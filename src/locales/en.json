@@ -1,0 +1,101 @@
+{
+  "app": {
+    "name": "Shree Ganesh Automobile",
+    "tagline": "Business Management"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "username": "Username",
+    "password": "Password",
+    "usernamePlaceholder": "Enter your username",
+    "passwordPlaceholder": "Enter your password",
+    "forgotPassword": "Forgot Password? Contact SuperAdmin",
+    "signingIn": "Signing in…",
+    "loginFailed": "Login failed",
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "remoteLogout": "You have been logged out remotely.",
+    "accountDisabled": "Your account has been disabled. Contact SuperAdmin."
+  },
+  "nav": {
+    "home": "Home",
+    "customers": "Customers",
+    "invoices": "Invoices",
+    "inventory": "Inventory",
+    "more": "More",
+    "messaging": "Messaging",
+    "quotations": "Quotations",
+    "carRepo": "Car Repository",
+    "docsRepo": "Docs Repository",
+    "settings": "Settings",
+    "auditLog": "Audit Log",
+    "admin": "Admin Panel"
+  },
+  "dashboard": {
+    "greeting_morning": "Good Morning",
+    "greeting_afternoon": "Good Afternoon",
+    "greeting_evening": "Good Evening",
+    "pendingInvoices": "Pending Invoices",
+    "lowStock": "Low Stock Items",
+    "reminders": "Upcoming Reminders",
+    "followUps": "Pending Follow-ups",
+    "recentActivity": "Recent Activity",
+    "quickActions": "Quick Actions",
+    "newInvoice": "New Invoice",
+    "newCustomer": "New Customer",
+    "newQuotation": "New Quotation"
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "noData": "No data found",
+    "error": "Something went wrong",
+    "success": "Done!",
+    "confirm": "Confirm",
+    "back": "Back",
+    "close": "Close",
+    "required": "Required",
+    "optional": "Optional"
+  },
+  "settings": {
+    "title": "Settings",
+    "account": "Account",
+    "theme": "Theme",
+    "language": "Language",
+    "lightMode": "Light Mode",
+    "darkMode": "Dark Mode",
+    "english": "English",
+    "gujarati": "ગુજરાતી",
+    "changePassword": "Change Password",
+    "businessInfo": "Business Info",
+    "gst": "GST Settings",
+    "lowStock": "Low Stock Alerts",
+    "userManagement": "User Management",
+    "dbControls": "Database Controls"
+  },
+  "roles": {
+    "superadmin": "SuperAdmin",
+    "owner": "Owner",
+    "employee": "Employee",
+    "accountant": "Accountant"
+  },
+  "status": {
+    "paid": "Paid",
+    "partiallyPaid": "Partially Paid",
+    "unpaid": "Unpaid",
+    "emi": "EMI",
+    "loan": "Loan",
+    "pending": "Pending Approval",
+    "approved": "Approved",
+    "notStarted": "Not Started",
+    "active": "Active",
+    "blocked": "Blocked"
+  }
+}

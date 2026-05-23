@@ -1,0 +1,240 @@
+// ============================================================
+// InvoiceStepReview.jsx — Step 5: Review & Submit
+// Phase 4 — Shree Ganesh Automobile
+// ============================================================
+
+import { User, Car, Package, Wrench, CreditCard, Calendar, CheckCircle } from "lucide-react";
+import { formatCurrency, formatDate, PAYMENT_METHODS } from "../../lib/invoiceHelpers";
+import InvoiceStatusBadge from "./InvoiceStatusBadge";
+
+export default function InvoiceStepReview({ data, darkMode }) {
+  const isDark = darkMode;
+  const border = isDark ? "#3A3A3A" : "#E8E2DF";
+  const textPrimary = isDark ? "#E8E8E8" : "#222222";
+  const textSecondary = isDark ? "#999999" : "#666666";
+  const sectionBg = isDark ? "#1A1A1A" : "#F5F0EE";
+
+  const customer = data.customerSnapshot || {};
+  const vehicle = data.vehicleSnapshot || {};
+  const items = data.items || [];
+  const labourCost = parseFloat(data.labourCost || 0);
+  const totalAmount = parseFloat(data.totalAmount || 0);
+  const amountPaid = parseFloat(data.amountPaid || 0);
+  const balanceDue = Math.max(0, totalAmount - amountPaid);
+  const paymentStatus = data.paymentStatus || "UNPAID";
+  const methodLabel = PAYMENT_METHODS.find((m) => m.value === data.paymentMethod)?.label || data.paymentMethod;
+  const invoiceDate = data.invoiceDate
+    ? new Date(data.invoiceDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "—";
+
+  const Section = ({ icon: Icon, title, children }) => (
+    <div
+      style={{
+        background: sectionBg,
+        borderRadius: 10,
+        padding: "14px 16px",
+        marginBottom: 12,
+        border: `1px solid ${border}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+          paddingBottom: 8,
+          borderBottom: `1px solid ${border}`,
+        }}
+      >
+        <Icon size={15} color="#661F1F" />
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#661F1F",
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+            fontFamily: "Arial, sans-serif",
+          }}
+        >
+          {title}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+
+  const Row = ({ label, value, mono, amber, bold }) => (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 5,
+      }}
+    >
+      <span style={{ fontSize: 12, color: textSecondary }}>{label}</span>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: bold ? 700 : 500,
+          color: amber ? "#CC6600" : textPrimary,
+          fontFamily: mono ? "'Courier New', monospace" : "inherit",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Status notice */}
+      <div
+        style={{
+          background: "#E3F2FD",
+          border: "1.5px solid #90CAF9",
+          borderRadius: 10,
+          padding: "12px 16px",
+          marginBottom: 16,
+          display: "flex",
+          gap: 10,
+          alignItems: "flex-start",
+        }}
+      >
+        <CheckCircle size={18} color="#0055CC" style={{ flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0055CC" }}>
+            Ready to Submit
+          </div>
+          <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>
+            This invoice will be created as <strong>PENDING</strong> and will require
+            Owner approval before inventory is deducted and PDF is sent.
+          </div>
+        </div>
+      </div>
+
+      {/* Customer */}
+      <Section icon={User} title="Customer">
+        <Row label="Name" value={customer.name || "—"} bold />
+        <Row label="Phone" value={customer.phone || "—"} />
+        {customer.alternatePhone && <Row label="Alt. Phone" value={customer.alternatePhone} />}
+      </Section>
+
+      {/* Vehicle */}
+      <Section icon={Car} title="Vehicle">
+        <Row label="Reg. No." value={vehicle.registrationNo || "—"} mono bold />
+        <Row label="Make / Model" value={`${vehicle.make || ""} ${vehicle.model || ""}`.trim() || "—"} />
+        {vehicle.year && <Row label="Year" value={vehicle.year} />}
+        {vehicle.emissionCategory && <Row label="Emission" value={vehicle.emissionCategory} />}
+      </Section>
+
+      {/* Items */}
+      <Section icon={Package} title={`Items (${items.length})`}>
+        {items.map((item, idx) => (
+          <div
+            key={idx}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              paddingBottom: 6,
+              marginBottom: 6,
+              borderBottom: idx < items.length - 1 ? `1px solid ${border}` : "none",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, color: textPrimary, fontWeight: 500 }}>{item.name}</div>
+              <div style={{ fontSize: 11, color: textSecondary }}>
+                {item.quantity} × {formatCurrency(item.sellingPrice)}
+              </div>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#661F1F", fontFamily: "'Courier New', monospace" }}>
+              {formatCurrency(item.sellingPrice * item.quantity)}
+            </span>
+          </div>
+        ))}
+        {labourCost > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Wrench size={13} color="#888" />
+              <span style={{ fontSize: 13, color: textPrimary }}>Labour</span>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#661F1F", fontFamily: "'Courier New', monospace" }}>
+              {formatCurrency(labourCost)}
+            </span>
+          </div>
+        )}
+      </Section>
+
+      {/* Payment */}
+      <Section icon={CreditCard} title="Payment">
+        <Row label="Subtotal" value={formatCurrency(data.subtotal || 0)} mono />
+        {data.gstEnabled && (
+          <>
+            <Row label="CGST (9%)" value={formatCurrency(data.cgst || 0)} mono />
+            <Row label="SGST (9%)" value={formatCurrency(data.sgst || 0)} mono />
+          </>
+        )}
+        <div
+          style={{
+            borderTop: `1px solid ${border}`,
+            paddingTop: 8,
+            marginTop: 4,
+          }}
+        >
+          <Row label="Total Amount" value={formatCurrency(totalAmount)} mono bold />
+          <Row label="Amount Paid" value={formatCurrency(amountPaid)} mono />
+          <Row
+            label="Balance Due"
+            value={formatCurrency(balanceDue)}
+            mono
+            bold
+            amber={balanceDue > 0}
+          />
+        </div>
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Row label="Method" value={methodLabel} />
+          <InvoiceStatusBadge invoice={paymentStatus} size="xs" />
+        </div>
+        {data.loanProvider && <Row label="Provider" value={data.loanProvider} />}
+        {data.emiAmount && (
+          <Row label="EMI / Month" value={formatCurrency(data.emiAmount)} mono />
+        )}
+        {data.loanCompletionDate && (
+          <Row label="Completion" value={new Date(data.loanCompletionDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} />
+        )}
+      </Section>
+
+      {/* Date */}
+      <Section icon={Calendar} title="Invoice Date">
+        <Row
+          label="Invoice Date"
+          value={invoiceDate}
+          amber={data.isDateOverridden}
+        />
+        {data.isDateOverridden && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#CC6600",
+              background: "#FFF3E0",
+              borderRadius: 6,
+              padding: "5px 8px",
+              marginTop: 4,
+            }}
+          >
+            ⚠ Date manually changed — will be highlighted with "M" tag in list views.
+          </div>
+        )}
+        {data.dueDate && (
+          <Row
+            label="Due Date"
+            value={new Date(data.dueDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+          />
+        )}
+      </Section>
+    </div>
+  );
+}

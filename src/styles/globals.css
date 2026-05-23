@@ -1,0 +1,351 @@
+/* ─────────────────────────────────────────────────────────────
+   Shree Ganesh Automobile — Global Stylesheet
+   Design System: Warm Burgundy on Warm Gray canvas
+   ───────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Custom Properties (Light Mode defaults) ──────────── */
+:root {
+  /* Surfaces */
+  --bg-app:       #CDCBC9;
+  --bg-card:      #F5F0EE;
+  --bg-elevated:  #FFFFFF;
+  --bg-divider:   #E8E2DF;
+
+  /* Brand */
+  --color-primary:   #661F1F;
+  --color-secondary: #8B3A3A;
+  --color-primary-light: #F5E6E6;
+
+  /* Text */
+  --text-primary:   #222222;
+  --text-secondary: #666666;
+  --text-placeholder: #999999;
+  --text-on-primary: #FFFFFF;
+
+  /* Status */
+  --status-paid-bg:    #E8F5E9;
+  --status-paid-text:  #1A7A1A;
+  --status-partial-bg: #FFF3E0;
+  --status-partial-text: #CC6600;
+  --status-unpaid-bg:  #FFEBEE;
+  --status-unpaid-text: #CC0000;
+  --status-emi-bg:     #E3F2FD;
+  --status-emi-text:   #0055CC;
+  --status-pending-bg: #F3E5F5;
+  --status-pending-text: #6A1B9A;
+
+  /* Borders */
+  --border-default: #E8E2DF;
+  --border-focus:   #661F1F;
+  --border-error:   #CC0000;
+
+  /* Nav */
+  --nav-bg:         #FFFFFF;
+  --nav-active:     #661F1F;
+  --nav-inactive:   #999999;
+
+  /* Misc */
+  --radius-card: 12px;
+  --radius-btn:  8px;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-nav:  0 -1px 12px rgba(0, 0, 0, 0.08);
+  --transition-default: all 0.2s ease;
+}
+
+/* ── Dark Mode overrides ───────────────────────────────────── */
+.dark {
+  --bg-app:      #1A1A1A;
+  --bg-card:     #2A2A2A;
+  --bg-elevated: #333333;
+  --bg-divider:  #3A3A3A;
+
+  --color-primary:   #8B3A3A;
+  --color-secondary: #661F1F;
+  --color-primary-light: #3A1515;
+
+  --text-primary:     #E8E8E8;
+  --text-secondary:   #999999;
+  --text-placeholder: #666666;
+  --text-on-primary:  #FFFFFF;
+
+  --status-paid-bg:    #1A2E1A;
+  --status-paid-text:  #66BB6A;
+  --status-partial-bg: #2E2010;
+  --status-partial-text: #FFA726;
+  --status-unpaid-bg:  #2E1010;
+  --status-unpaid-text: #EF5350;
+  --status-emi-bg:     #0D1E2E;
+  --status-emi-text:   #42A5F5;
+  --status-pending-bg: #1E0D2E;
+  --status-pending-text: #CE93D8;
+
+  --border-default: #3A3A3A;
+  --border-focus:   #8B3A3A;
+
+  --nav-bg:       #2A2A2A;
+  --nav-active:   #8B3A3A;
+  --nav-inactive: #666666;
+
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-nav:  0 -1px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Base resets ──────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar styling ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-secondary);
+  border-radius: 9999px;
+}
+
+/* ── Focus ring ───────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ── Selection ────────────────────────────────────────────── */
+::selection {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+/* ── Smooth page transitions ──────────────────────────────── */
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.page-exit {
+  opacity: 1;
+}
+.page-exit-active {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+/* ── Loading skeleton ─────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+/* ── Toast / Notification animation ──────────────────────── */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   COMPONENT LAYER
+   All custom component classes are placed inside @layer components
+   so that Tailwind utility classes (pl-10, pr-10, mt-2, etc.)
+   always override them — fixing icon/text overlap in Input fields.
+   ───────────────────────────────────────────────────────────── */
+@layer components {
+
+  /* ── Utility helpers ────────────────────────────────────── */
+  .app-bg    { background-color: var(--bg-app); }
+  .card-bg   { background-color: var(--bg-card); }
+  .elev-bg   { background-color: var(--bg-elevated); }
+
+  .text-primary-col   { color: var(--text-primary); }
+  .text-secondary-col { color: var(--text-secondary); }
+
+  .border-default { border-color: var(--border-default); }
+  .brand-color    { color: var(--color-primary); }
+  .brand-bg       { background-color: var(--color-primary); }
+
+  /* ── Card base ──────────────────────────────────────────── */
+  .sg-card {
+    background-color: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    border: 1px solid var(--border-default);
+    padding: 16px;
+    transition: box-shadow 0.2s ease;
+  }
+  .sg-card:hover {
+    box-shadow: 0 6px 24px rgba(102, 31, 31, 0.12);
+  }
+
+  /* ── Buttons ────────────────────────────────────────────── */
+  .sg-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 10px 20px;
+    border-radius: var(--radius-btn);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-default);
+    border: none;
+    text-decoration: none;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .sg-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sg-btn-primary {
+    background-color: var(--color-primary);
+    color: #FFFFFF;
+  }
+  .sg-btn-primary:hover:not(:disabled) {
+    background-color: var(--color-secondary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 31, 31, 0.3);
+  }
+
+  .sg-btn-secondary {
+    background-color: transparent;
+    color: var(--color-primary);
+    border: 1.5px solid var(--color-primary);
+  }
+  .sg-btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-primary-light);
+  }
+
+  .sg-btn-danger {
+    background-color: #CC0000;
+    color: #FFFFFF;
+  }
+  .sg-btn-danger:hover:not(:disabled) {
+    background-color: #AA0000;
+  }
+
+  .sg-btn-ghost {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: none;
+  }
+  .sg-btn-ghost:hover:not(:disabled) {
+    color: var(--color-primary);
+    background-color: var(--color-primary-light);
+  }
+
+  /* ── Input fields ───────────────────────────────────────── */
+  /*
+   * FIX (Bug 1): Moved into @layer components so Tailwind utilities
+   * (pl-10, pr-10) correctly override padding when icons are present.
+   * Previously, .sg-input was defined after @tailwind utilities in the
+   * file, causing the padding shorthand to override pl-10 and making
+   * left icons overlap with the input placeholder/text.
+   */
+  .sg-input {
+    width: 100%;
+    min-height: 44px;
+    /* Use longhand properties so utility classes (pl-10 etc.) can
+       override individual sides without fighting the shorthand. */
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    border-radius: var(--radius-btn);
+    border: 1.5px solid var(--border-default);
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    outline: none;
+  }
+  .sg-input::placeholder {
+    color: var(--text-placeholder);
+  }
+  .sg-input:focus {
+    border-color: var(--border-focus);
+    background-color: var(--bg-elevated);
+  }
+  .sg-input.error {
+    border-color: var(--border-error);
+  }
+
+  /* ── Status badges ──────────────────────────────────────── */
+  .sg-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+  .sg-badge-paid     { background: var(--status-paid-bg);    color: var(--status-paid-text); }
+  .sg-badge-partial  { background: var(--status-partial-bg); color: var(--status-partial-text); }
+  .sg-badge-unpaid   { background: var(--status-unpaid-bg);  color: var(--status-unpaid-text); }
+  .sg-badge-emi      { background: var(--status-emi-bg);     color: var(--status-emi-text); }
+  .sg-badge-pending  { background: var(--status-pending-bg); color: var(--status-pending-text); }
+
+  /* ── Loading skeleton ───────────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--bg-divider) 25%,
+      var(--bg-elevated) 50%,
+      var(--bg-divider) 75%
+    );
+    background-size: 2000px 100%;
+    animation: shimmer 1.6s infinite linear;
+    border-radius: var(--radius-btn);
+  }
+
+  /* ── Toast / Notification ───────────────────────────────── */
+  .toast-enter {
+    animation: slideInRight 0.3s ease forwards;
+  }
+
+  /* ── PWA install prompt ─────────────────────────────────── */
+  .pwa-prompt-enter {
+    animation: slideInRight 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+} /* end @layer components */

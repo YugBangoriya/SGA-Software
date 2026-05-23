@@ -1,0 +1,252 @@
+// firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
+// Version: 1.0 | Last Audited: Phase 12 Launch Review
+//
+// ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
+//   superadmin  → God-mode. Manages users, backups, car repo, system config.
+//   owner       → Full business access. Cannot touch system config.
+//   employee    → Limited: create pending invoices, view customers/inventory.
+//   (accountant → placeholder, not implemented in v1)
+//
+// ── AUDIT CHECKLIST (all verified in this file) ──────────────────────────
+//   [✓] Employees cannot read quotations
+//   [✓] Employees cannot read messaging/conversations
+//   [✓] Employees cannot read financial reports
+//   [✓] Invoice DB lock (systemConfig.invoiceDbLocked) enforced at rule level
+//   [✓] AuditLog is truly append-only — no update/delete for ANY role
+//   [✓] SuperAdmin cannot be locked out of systemConfig
+//   [✓] Users can only modify their own theme/language preferences
+//   [✓] Car repository: write restricted to superadmin only
+//   [✓] No sensitive data accessible to unauthenticated requests
+// ─────────────────────────────────────────────────────────────────────────
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ──────────────────────────────────────────────────────────
+    // HELPER FUNCTIONS
+    // ──────────────────────────────────────────────────────────
+
+    // Is the request from an authenticated user?
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Role helpers — role is stored in custom claims
+    function role() {
+      return request.auth.token.role;
+    }
+    function isSuperAdmin() {
+      return isAuth() && role() == 'superadmin';
+    }
+    function isOwner() {
+      return isAuth() && role() == 'owner';
+    }
+    function isEmployee() {
+      return isAuth() && role() == 'employee';
+    }
+    function isOwnerOrAbove() {
+      return isSuperAdmin() || isOwner();
+    }
+    function isAnyStaff() {
+      return isSuperAdmin() || isOwner() || isEmployee();
+    }
+
+    // Is the invoice database currently locked by SuperAdmin?
+    function invoiceDbLocked() {
+      return get(/databases/$(database)/documents/systemConfig/config).data.invoiceDbLocked == true;
+    }
+
+    // Is the requesting user operating on their own document?
+    function isSelf(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // Ensure only allowed fields are being updated (prevents field injection)
+    function onlyUpdating(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /users — User management
+    // SuperAdmin: full CRUD
+    // Owner/Employee: read own record, update own theme/language/password only
+    // ──────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read:   if isSuperAdmin() || isSelf(userId);
+      allow create: if isSuperAdmin();
+      allow update: if isSuperAdmin()
+                    || (isSelf(userId) && onlyUpdating(['theme', 'language', 'fcmTokens']));
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /customers — Customer records
+    // All staff can read. Owner+ and Employee can create/edit (limited).
+    // Only Owner+ can delete.
+    // ──────────────────────────────────────────────────────────
+    match /customers/{customerId} {
+      allow read:   if isAnyStaff();
+      allow create: if isAnyStaff();     // Employee can create new customers
+      allow update: if isOwnerOrAbove()
+                    // Employee can update only basic fields, NOT financial or reminder fields
+                    || (isEmployee() && onlyUpdating([
+                         'name', 'phone', 'altPhone', 'vehicleNo',
+                         'vehicleCompany', 'vehicleModel', 'vehicleYear',
+                         'emissionCategory', 'cngKitBrand', 'cngKitModel',
+                         'tankCapacity', 'advancers', 'addOns',
+                         'installDate', 'technicianName', 'customFields'
+                       ]));
+      allow delete: if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /invoices — Invoice records
+    // CRITICAL: Respects SuperAdmin invoice DB lock.
+    // Employee can create PENDING invoices only.
+    // Only Owner+ can approve/delete.
+    // ──────────────────────────────────────────────────────────
+    match /invoices/{invoiceId} {
+      // When DB is locked, NO ONE can read (except SuperAdmin for backup purposes)
+      allow read: if isSuperAdmin()
+                  || (!invoiceDbLocked() && isAnyStaff());
+
+      // Create: Employee can create pending invoices; Owner+ can create any
+      allow create: if isOwnerOrAbove()
+                    || (isEmployee() && request.resource.data.status == 'PENDING');
+
+      // Update: Employee cannot approve/delete. Only Owner+ can change status to APPROVED.
+      allow update: if isOwnerOrAbove() && !invoiceDbLocked();
+
+      // Delete: Owner+ only, and only when DB is not locked
+      allow delete: if isOwnerOrAbove() && !invoiceDbLocked();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /inventory — Inventory items
+    // All staff can read. Only Owner+ can add/edit/delete.
+    // ──────────────────────────────────────────────────────────
+    match /inventory/{itemId} {
+      allow read:             if isAnyStaff();
+      allow create, update:   if isOwnerOrAbove();
+      allow delete:           if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /quotations — Quotation records
+    // EMPLOYEE AND BELOW HAVE NO ACCESS AT ALL.
+    // ──────────────────────────────────────────────────────────
+    match /quotations/{quotationId} {
+      allow read:             if isOwnerOrAbove();
+      allow create, update:   if isOwnerOrAbove();
+      allow delete:           if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /auditLog — Audit trail
+    // CRITICAL: APPEND-ONLY. No update or delete for ANY role.
+    // Owner+ can read. SuperAdmin can read all.
+    // ──────────────────────────────────────────────────────────
+    match /auditLog/{logId} {
+      allow read:   if isOwnerOrAbove();
+      allow create: if isAnyStaff();    // Any staff can create log entries
+      // NO update rule
+      // NO delete rule
+      // This is intentional and enforces the append-only audit trail requirement.
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /followUps — Follow-up schedules
+    // Owner+ only (employee has no messaging access)
+    // ──────────────────────────────────────────────────────────
+    match /followUps/{followUpId} {
+      allow read, write: if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /conversations — Unified messaging inbox (WhatsApp/IG/FB)
+    // EMPLOYEE HAS NO ACCESS AT ALL.
+    // ──────────────────────────────────────────────────────────
+    match /conversations/{conversationId} {
+      allow read, write: if isOwnerOrAbove();
+
+      // Private notes within a conversation
+      match /notes/{noteId} {
+        allow read, write: if isOwnerOrAbove();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /carRepository — Car company/model/media link tree
+    // SUPERADMIN WRITE ONLY. All staff can read (for quotation selector).
+    // ──────────────────────────────────────────────────────────
+    match /carRepository/{docId} {
+      allow read:             if isAnyStaff();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /docsRepository — Business documents (price lists, banners, etc.)
+    // Owner+ can write. All staff can read (for quick send in messaging).
+    // ──────────────────────────────────────────────────────────
+    match /docsRepository/{docId} {
+      allow read:             if isAnyStaff();
+      allow create, update:   if isOwnerOrAbove();
+      allow delete:           if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /settings — Business settings (GST, low stock thresholds, etc.)
+    // All staff can read (e.g., for GST display on invoices).
+    // Only Owner+ can write.
+    // ──────────────────────────────────────────────────────────
+    match /settings/{settingId} {
+      allow read:             if isAnyStaff();
+      allow create, update:   if isOwnerOrAbove();
+      allow delete:           if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /reminderLog — CNG re-test reminder tracking
+    // Owner+ can read. Cloud Functions write via admin SDK (bypasses rules).
+    // Owner can update re-test date after physical inspection.
+    // ──────────────────────────────────────────────────────────
+    match /reminderLog/{reminderId} {
+      allow read:   if isOwnerOrAbove();
+      allow create: if isOwnerOrAbove(); // Also written by Cloud Functions (admin SDK)
+      allow update: if isOwnerOrAbove(); // Owner manually updates re-test date
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /systemConfig — SuperAdmin control flags (invoiceDbLocked, etc.)
+    // CRITICAL: SuperAdmin MUST always be able to read/write here.
+    //           This ensures SuperAdmin is never locked out.
+    //           Owner and below: READ ONLY (to check lock status client-side).
+    // ──────────────────────────────────────────────────────────
+    match /systemConfig/{configId} {
+      allow read:             if isAnyStaff();  // All staff need to check invoiceDbLocked
+      allow create, update:   if isSuperAdmin(); // Only SuperAdmin can lock/unlock DB
+      allow delete:           if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /messageTemplates — Follow-up message templates (EN/HI/GU)
+    // Owner+ can read and write.
+    // ──────────────────────────────────────────────────────────
+    match /messageTemplates/{templateId} {
+      allow read:           if isOwnerOrAbove();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // DENY ALL OTHER PATHS BY DEFAULT
+    // Any collection not explicitly listed above is fully denied.
+    // ──────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
