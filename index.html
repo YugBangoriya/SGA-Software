@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- PWA + mobile meta -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable"       content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title"   content="SGA" />
+    <meta name="theme-color"                  content="#661F1F" />
+
+    <!-- SEO / description -->
+    <meta name="description" content="Shree Ganesh Automobile — Business Management Software" />
+    <meta name="robots"      content="noindex, nofollow" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="apple-touch-icon"          href="/icons/icon-192.png" />
+
+    <!-- Google Fonts: DM Sans + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>Shree Ganesh Automobile</title>
+
+    <!--
+      Inline theme script — runs BEFORE React mounts.
+      Reads localStorage and applies dark class immediately,
+      preventing any flash of wrong theme on page load.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("sga_theme") || "light";
+          if (t === "dark") document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,90 @@
+// ─────────────────────────────────────────────────────────
+//  storage.rules  (COMPLETE FILE — merge with existing rules)
+//
+//  Shree Ganesh Automobile — Firebase Storage Security Rules
+//  Phase 7: Docs Repository additions
+//
+//  INSTRUCTIONS:
+//    Copy the new "match" block below into your existing
+//    storage.rules file inside:
+//      match /b/{bucket}/o { ... }
+//    Keep all existing Phase 1–6 rules intact.
+// ─────────────────────────────────────────────────────────
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─── Helper functions ────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getRole() {
+      return request.auth.token.role;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && getRole() == 'superadmin';
+    }
+
+    function isOwner() {
+      return isAuthenticated() && getRole() == 'owner';
+    }
+
+    function isOwnerOrSuperAdmin() {
+      return isSuperAdmin() || isOwner();
+    }
+
+    // ────────────────────────────────────────────────────
+    //  docsRepository/** storage path
+    //
+    //  READ:   SuperAdmin + Owner only
+    //          (employees cannot access the raw Storage URLs
+    //           through the app — but a possessor of a
+    //           Firebase Storage download URL can access it
+    //           directly; keep URLs private via Firestore rules)
+    //
+    //  WRITE:  SuperAdmin + Owner only
+    //  DELETE: SuperAdmin + Owner only
+    //
+    //  Max file size: 50 MB (52,428,800 bytes)
+    //  Allowed content types: enforced here + in client validation
+    // ────────────────────────────────────────────────────
+    match /docsRepository/{allPaths=**} {
+      allow read:   if isOwnerOrSuperAdmin();
+
+      allow write:  if isOwnerOrSuperAdmin()
+                    // Enforce max file size: 50 MB
+                    && request.resource.size <= 52428800
+                    // Enforce allowed content types
+                    && (
+                      request.resource.contentType.matches('application/pdf')
+                      || request.resource.contentType.matches('image/.*')
+                      || request.resource.contentType.matches('video/mp4')
+                      || request.resource.contentType.matches('video/quicktime')
+                      || request.resource.contentType.matches('video/webm')
+                      || request.resource.contentType.matches('application/msword')
+                      || request.resource.contentType.matches(
+                           'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+                      || request.resource.contentType.matches('application/vnd.ms-excel')
+                      || request.resource.contentType.matches(
+                           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                      || request.resource.contentType.matches('text/csv')
+                    );
+
+      allow delete: if isOwnerOrSuperAdmin();
+    }
+
+    // ────────────────────────────────────────────────────
+    //  Existing storage paths from Phase 1–6
+    //  (invoices, quotation PDFs, business logo, etc.)
+    //  — keep these exactly as defined in prior phases —
+    // ────────────────────────────────────────────────────
+
+    // match /invoices/{allPaths=**} { ... }
+    // match /quotations/{allPaths=**} { ... }
+    // match /businessAssets/{allPaths=**} { ... }
+    // ... (Phase 1 rules unchanged)
+  }
+}
