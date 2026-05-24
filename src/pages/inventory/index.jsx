@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -31,6 +32,7 @@ import { formatCurrency, formatDate } from '../../lib/invoiceHelpers';
 import LowStockBanner    from './LowStockBanner';
 import AddInventoryModal  from './AddInventoryModal';
 import ReplenishModal    from './ReplenishModal';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ─── Shared Sub-Components ─────────────────────────────────────────────────
 
@@ -349,7 +351,9 @@ export default function InventoryPage() {
         boxShadow:   '0 4px 20px rgba(102,31,31,0.35)',
       }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <HomeButton />
+            <div>
             <h1 style={{
               color:      '#FFFFFF',
               fontSize:   isMobile ? 20 : 24,
@@ -372,6 +376,7 @@ export default function InventoryPage() {
                 </span>
               )}
             </p>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button

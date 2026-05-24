@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * CustomerList.jsx
  * Route: /customers
@@ -56,6 +57,7 @@ import { COLORS, FONTS, RADIUS, SHADOWS } from '../../lib/tokens';
 import {
   Button, Card, Badge, Spinner, EmptyState, Input, Select, Skeleton,
 } from '../../components/ui/ui';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ── Lucide icons (inline SVG fallback if lucide-react not installed) ──────────
 const SearchIcon = () => (
@@ -323,13 +325,16 @@ function Header({ c, isOwnerOrAbove, navigate }) {
       position: 'sticky', top: 0, zIndex: 40,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <HomeButton variant="light" />
+          <div>
           <h1 style={{ margin: 0, fontFamily: FONTS.heading, fontSize: 24, color: c.primary, fontWeight: 700 }}>
             Customers
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: 12, color: c.textSecondary }}>
             CNG Installation Records
           </p>
+          </div>
         </div>
         {isOwnerOrAbove && (
           <Button icon={<PlusIcon />} size="sm" onClick={() => navigate('/customers/new')}>

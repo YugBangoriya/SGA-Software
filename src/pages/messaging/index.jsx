@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * UnifiedInbox — Main container for Phase 8 Unified Messaging.
  *
@@ -290,6 +291,7 @@ function MessagingToolbar() {
         flexWrap: "wrap",
       }}
     >
+      <HomeButton variant="light" />
       <span
         style={{
           fontSize: 11,

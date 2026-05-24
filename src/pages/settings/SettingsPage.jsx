@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 // src/pages/settings/SettingsPage.jsx
 // Master Settings shell — role-based tab navigation, renders all settings panels.
 // SuperAdmin sees: SuperAdmin + Owner + User sections (god-mode).
@@ -140,16 +141,19 @@ export default function SettingsPage() {
         }}
       >
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <h1
-            style={{
-              color: "#fff",
-              fontSize: 22,
-              fontWeight: 700,
-              margin: "0 0 4px",
-            }}
-          >
-            Settings
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <HomeButton />
+            <h1
+              style={{
+                color: "#fff",
+                fontSize: 22,
+                fontWeight: 700,
+                margin: 0,
+              }}
+            >
+              Settings
+            </h1>
+          </div>
           <p style={{ color: "#F0BABA", fontSize: 13, margin: "0 0 16px" }}>
             Manage business configuration, user accounts, and preferences
           </p>

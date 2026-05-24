@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 // src/pages/quotations/QuotationList.jsx
 // Phase 5 — Quotation Module
 // Searchable, filterable list of all quotations. Owner-only.
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import useQuotationStore from "../../store/quotationStore";
 import { fetchQuotations } from "../../lib/quotationService";
+import HomeButton from '../../components/ui/HomeButton';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatINR(n) {
@@ -165,9 +167,12 @@ export default function QuotationList() {
       <div className="sticky top-0 z-30 bg-[#661F1F] shadow-xl">
         <div className="max-w-2xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="flex items-center gap-2.5">
+              <HomeButton />
+              <div>
               <p className="text-[#F0BABA] text-[10px] font-sans tracking-widest uppercase">Owner</p>
               <h1 className="text-white text-xl font-bold leading-tight">Quotations</h1>
+              </div>
             </div>
             <button
               onClick={() => navigate("/quotations/new")}

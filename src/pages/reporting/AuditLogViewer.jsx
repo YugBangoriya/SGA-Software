@@ -1,14 +1,30 @@
+// SGA — Last updated: Added SuperAdmin audit log delete — select individual entries or wipe all
 /**
  * AuditLogViewer.jsx
  * Full audit trail viewer for Owner and SuperAdmin.
  * Features: filter by user / action type / date range, search, CSV export.
+ *
+ * NEW (Post-Launch): SuperAdmin can now delete audit log entries in two ways:
+ *   1. Select individual entries (checkboxes) → Delete Selected
+ *   2. Wipe All — deletes the entire audit log collection at once
+ *   Both actions require a confirmation dialog.
+ *   Delete controls are ONLY shown when userRole === 'superadmin'.
  */
 
 import { useState, useMemo } from 'react';
 import {
   Search, Download, Filter, X, ChevronDown, ChevronUp,
   Clock, User, Activity, FileText, Shield, RefreshCw,
+  Trash2, CheckSquare, Square, AlertTriangle,
 } from 'lucide-react';
+import {
+  collection,
+  doc,
+  deleteDoc,
+  getDocs,
+  writeBatch,
+} from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import {
   useAuditLog,
   AUDIT_ACTION_TYPES,
@@ -16,6 +32,8 @@ import {
   buildAuditSummary,
 } from '../../hooks/useAuditLog';
 import { exportToCSV, formatTimestampForCSV } from '../../lib/csvExport';
+import useAuthStore from '../../store/authStore';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -81,6 +99,66 @@ function formatTimestamp(ts) {
   });
 }
 
+// ── Confirmation Dialog ────────────────────────────────────────────────────
+
+function ConfirmDialog({ title, message, onConfirm, onCancel, isDanger = true }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, padding: 20,
+    }}>
+      <div style={{
+        background: '#FFFFFF', borderRadius: 16, padding: 28,
+        maxWidth: 420, width: '100%',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%',
+            background: isDanger ? '#FFEBEE' : '#FFF3E0',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <AlertTriangle size={20} color={isDanger ? '#CC0000' : '#CC6600'} />
+          </div>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: '#222', margin: 0, fontFamily: 'system-ui' }}>
+            {title}
+          </h3>
+        </div>
+        <p style={{ fontSize: 14, color: '#555', lineHeight: 1.6, margin: '0 0 24px', fontFamily: 'system-ui' }}>
+          {message}
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '10px 20px', borderRadius: 8, border: '1.5px solid #E8E2DF',
+              background: '#F5F0EE', color: '#444', fontSize: 14, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'system-ui',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              padding: '10px 20px', borderRadius: 8, border: 'none',
+              background: isDanger ? '#CC0000' : '#661F1F',
+              color: '#fff', fontSize: 14, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'system-ui',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Trash2 size={14} />
+            {isDanger ? 'Delete' : 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Filter Bar ─────────────────────────────────────────────────────────────
 
 function FilterBar({ filters, setFilters, users, onClear }) {
@@ -88,7 +166,6 @@ function FilterBar({ filters, setFilters, users, onClear }) {
   const hasActive =
     filters.userId || filters.action || filters.startDate || filters.endDate;
 
-  // Group actions for the <select>
   const groups = useMemo(() => {
     const g = {};
     AUDIT_ACTION_TYPES.forEach((a) => {
@@ -239,28 +316,48 @@ const inputStyle = {
 
 // ── Entry Row ──────────────────────────────────────────────────────────────
 
-function AuditEntry({ entry, index }) {
+function AuditEntry({ entry, index, isSelected, onToggleSelect, showCheckbox }) {
   const [expanded, setExpanded] = useState(false);
   const summary = buildAuditSummary(entry);
 
   return (
     <div
       style={{
-        background: index % 2 === 0 ? '#FFFFFF' : '#FAF8F7',
+        background: isSelected
+          ? '#FFF5F5'
+          : index % 2 === 0 ? '#FFFFFF' : '#FAF8F7',
         borderBottom: '1px solid #E8E2DF',
-        cursor: 'pointer',
+        borderLeft: isSelected ? '3px solid #CC0000' : '3px solid transparent',
       }}
-      onClick={() => setExpanded(!expanded)}
     >
-      <div style={{
-        padding: '12px 16px',
-        display: 'grid',
-        gridTemplateColumns: '160px 1fr auto auto',
-        gap: 12,
-        alignItems: 'center',
-      }}>
+      <div
+        style={{
+          padding: '12px 16px',
+          display: 'grid',
+          gridTemplateColumns: showCheckbox ? '28px 160px 1fr auto auto' : '160px 1fr auto auto',
+          gap: 12,
+          alignItems: 'center',
+        }}
+      >
+        {/* Checkbox (SuperAdmin only) */}
+        {showCheckbox && (
+          <button
+            onClick={() => onToggleSelect(entry.id)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: 0, color: isSelected ? '#CC0000' : '#CCBBBB',
+              display: 'flex', alignItems: 'center',
+            }}
+          >
+            {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+          </button>
+        )}
+
         {/* Timestamp */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          onClick={() => setExpanded(!expanded)}
+        >
           <Clock size={12} color="#999" style={{ flexShrink: 0 }} />
           <span style={{ fontSize: 12, color: '#666', fontFamily: 'monospace', lineHeight: 1.4 }}>
             {formatTimestamp(entry.timestamp)}
@@ -268,7 +365,7 @@ function AuditEntry({ entry, index }) {
         </div>
 
         {/* Summary + user */}
-        <div>
+        <div style={{ cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
           <p style={{ fontSize: 13, color: '#222', margin: 0, fontFamily: 'system-ui', lineHeight: 1.4 }}>
             {summary}
           </p>
@@ -282,10 +379,15 @@ function AuditEntry({ entry, index }) {
         </div>
 
         {/* Action badge */}
-        <ActionBadge action={entry.action} />
+        <div onClick={() => setExpanded(!expanded)} style={{ cursor: 'pointer' }}>
+          <ActionBadge action={entry.action} />
+        </div>
 
         {/* Expand chevron */}
-        <span style={{ color: '#999', fontSize: 14 }}>
+        <span
+          style={{ color: '#999', fontSize: 14, cursor: 'pointer' }}
+          onClick={() => setExpanded(!expanded)}
+        >
           {expanded ? '▴' : '▾'}
         </span>
       </div>
@@ -322,7 +424,10 @@ function AuditEntry({ entry, index }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export default function AuditLogViewer({ userRole }) {
+export default function AuditLogViewer() {
+  const role = useAuthStore((s) => s.role);
+  const isSuperAdmin = role === 'superadmin';
+
   const [filters, setFilters] = useState({
     userId: null,
     action: null,
@@ -331,8 +436,15 @@ export default function AuditLogViewer({ userRole }) {
     search: '',
   });
 
+  // Delete state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmDialog, setConfirmDialog] = useState(null); // null | 'selected' | 'all'
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState(null);
+
   const { entries, allEntries, loading, error, users } = useAuditLog(filters);
 
+  // ── Export CSV ──────────────────────────────────────────────────────────
   const handleExport = () => {
     const exportData = entries.map((e) => ({
       timestamp:    formatTimestampForCSV(e.timestamp),
@@ -357,6 +469,71 @@ export default function AuditLogViewer({ userRole }) {
     ]);
   };
 
+  // ── Select / Deselect ───────────────────────────────────────────────────
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === entries.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(entries.map((e) => e.id)));
+    }
+  };
+
+  // ── Delete Helpers ──────────────────────────────────────────────────────
+  const doDeleteSelected = async () => {
+    setDeleting(true);
+    setConfirmDialog(null);
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.delete(doc(db, 'auditLog', id));
+      });
+      await batch.commit();
+      const count = selectedIds.size;
+      setSelectedIds(new Set());
+      setDeleteMsg(`✓ ${count} log ${count === 1 ? 'entry' : 'entries'} deleted.`);
+    } catch (err) {
+      setDeleteMsg(`Error: ${err.message}`);
+    } finally {
+      setDeleting(false);
+      setTimeout(() => setDeleteMsg(null), 4000);
+    }
+  };
+
+  const doWipeAll = async () => {
+    setDeleting(true);
+    setConfirmDialog(null);
+    try {
+      // Firestore batch limit is 500; fetch all IDs and delete in batches
+      const snap = await getDocs(collection(db, 'auditLog'));
+      const allIds = snap.docs.map((d) => d.id);
+      const CHUNK = 499;
+      for (let i = 0; i < allIds.length; i += CHUNK) {
+        const chunk = allIds.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        chunk.forEach((id) => batch.delete(doc(db, 'auditLog', id)));
+        await batch.commit();
+      }
+      setSelectedIds(new Set());
+      setDeleteMsg(`✓ All ${allIds.length} audit log entries wiped.`);
+    } catch (err) {
+      setDeleteMsg(`Error: ${err.message}`);
+    } finally {
+      setDeleting(false);
+      setTimeout(() => setDeleteMsg(null), 5000);
+    }
+  };
+
+  const allVisibleSelected = entries.length > 0 && selectedIds.size === entries.length;
+
   return (
     <div style={{ padding: '0 0 60px' }}>
       {/* ── Page Header ── */}
@@ -369,7 +546,9 @@ export default function AuditLogViewer({ userRole }) {
         gap: 12,
         flexWrap: 'wrap',
       }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <HomeButton />
+          <div>
           <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
             Audit Log
           </h2>
@@ -378,22 +557,89 @@ export default function AuditLogViewer({ userRole }) {
             {filters.search || filters.userId || filters.action ? ` · ${entries.length} shown` : ''}
           </p>
         </div>
-        <button
-          onClick={handleExport}
-          disabled={loading || entries.length === 0}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: entries.length > 0 ? '#F5F0EE' : 'rgba(255,255,255,0.2)',
-            color: entries.length > 0 ? '#661F1F' : '#999',
-            border: 'none', borderRadius: 8,
-            padding: '8px 16px', fontSize: 13, fontWeight: 600,
-            cursor: entries.length > 0 ? 'pointer' : 'not-allowed',
-            fontFamily: 'system-ui',
-          }}
-        >
-          <Download size={14} /> Export CSV
-        </button>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Export CSV */}
+          <button
+            onClick={handleExport}
+            disabled={loading || entries.length === 0}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: entries.length > 0 ? '#F5F0EE' : 'rgba(255,255,255,0.2)',
+              color: entries.length > 0 ? '#661F1F' : '#999',
+              border: 'none', borderRadius: 8,
+              padding: '8px 16px', fontSize: 13, fontWeight: 600,
+              cursor: entries.length > 0 ? 'pointer' : 'not-allowed',
+              fontFamily: 'system-ui',
+            }}
+          >
+            <Download size={14} /> Export CSV
+          </button>
+
+          {/* Delete Selected (SuperAdmin only, when items are selected) */}
+          {isSuperAdmin && selectedIds.size > 0 && (
+            <button
+              onClick={() => setConfirmDialog('selected')}
+              disabled={deleting}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: '#FFEBEE', color: '#CC0000',
+                border: '1.5px solid #F0B8B8', borderRadius: 8,
+                padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'system-ui',
+              }}
+            >
+              <Trash2 size={14} />
+              Delete Selected ({selectedIds.size})
+            </button>
+          )}
+
+          {/* Wipe All (SuperAdmin only) */}
+          {isSuperAdmin && allEntries.length > 0 && (
+            <button
+              onClick={() => setConfirmDialog('all')}
+              disabled={deleting}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'rgba(204,0,0,0.15)', color: '#FFAAAA',
+                border: '1.5px solid rgba(204,0,0,0.3)', borderRadius: 8,
+                padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'system-ui',
+              }}
+            >
+              <Trash2 size={14} />
+              Wipe All Logs
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* ── Delete feedback banner ── */}
+      {deleteMsg && (
+        <div style={{
+          background: deleteMsg.startsWith('Error') ? '#FFEBEE' : '#E8F5E9',
+          color: deleteMsg.startsWith('Error') ? '#CC0000' : '#1A7A1A',
+          padding: '10px 16px', fontSize: 13, fontFamily: 'system-ui',
+          fontWeight: 600, borderBottom: '1px solid #E8E2DF',
+        }}>
+          {deleteMsg}
+        </div>
+      )}
+
+      {/* ── SuperAdmin selection hint ── */}
+      {isSuperAdmin && !loading && entries.length > 0 && (
+        <div style={{
+          background: '#FFF8EE',
+          borderBottom: '1px solid #FFE0A0',
+          padding: '8px 16px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          fontSize: 12, color: '#885500', fontFamily: 'system-ui',
+        }}>
+          <Shield size={13} />
+          <span>SuperAdmin: Use checkboxes to select entries for deletion, or use <strong>Wipe All Logs</strong> to clear the entire history.</span>
+        </div>
+      )}
 
       {/* ── Search + Filters ── */}
       <div style={{ padding: '16px 16px 0' }}>
@@ -436,13 +682,28 @@ export default function AuditLogViewer({ userRole }) {
         {/* Table header */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '160px 1fr auto auto',
+          gridTemplateColumns: isSuperAdmin ? '28px 160px 1fr auto auto' : '160px 1fr auto auto',
           gap: 12,
           padding: '8px 16px',
           background: '#E8E2DF',
           borderTop: '1px solid #D0C8C4',
           borderBottom: '1px solid #D0C8C4',
+          alignItems: 'center',
         }}>
+          {/* Select-all checkbox */}
+          {isSuperAdmin && (
+            <button
+              onClick={toggleSelectAll}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: 0, color: allVisibleSelected ? '#CC0000' : '#888',
+                display: 'flex', alignItems: 'center',
+              }}
+              title={allVisibleSelected ? 'Deselect all' : 'Select all visible'}
+            >
+              {allVisibleSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+            </button>
+          )}
           {['Timestamp', 'Action & User', 'Type', ''].map((h, i) => (
             <span key={i} style={{ fontSize: 11, fontWeight: 700, color: '#661F1F', fontFamily: 'system-ui', letterSpacing: 0.5 }}>
               {h}
@@ -451,10 +712,10 @@ export default function AuditLogViewer({ userRole }) {
         </div>
 
         {/* Loading */}
-        {loading && (
+        {(loading || deleting) && (
           <div style={{ padding: 40, textAlign: 'center', color: '#999', fontFamily: 'system-ui', fontSize: 14 }}>
             <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
-            <br />Loading audit log…
+            <br />{deleting ? 'Deleting entries…' : 'Loading audit log…'}
           </div>
         )}
 
@@ -466,7 +727,7 @@ export default function AuditLogViewer({ userRole }) {
         )}
 
         {/* Empty state */}
-        {!loading && !error && entries.length === 0 && (
+        {!loading && !deleting && !error && entries.length === 0 && (
           <div style={{ padding: 48, textAlign: 'center', color: '#999', fontFamily: 'system-ui' }}>
             <Activity size={32} color="#CCC" style={{ marginBottom: 8 }} />
             <p style={{ fontSize: 15, margin: 0 }}>No audit entries found</p>
@@ -475,10 +736,38 @@ export default function AuditLogViewer({ userRole }) {
         )}
 
         {/* Entries */}
-        {!loading && entries.map((entry, i) => (
-          <AuditEntry key={entry.id} entry={entry} index={i} />
+        {!loading && !deleting && entries.map((entry, i) => (
+          <AuditEntry
+            key={entry.id}
+            entry={entry}
+            index={i}
+            isSelected={selectedIds.has(entry.id)}
+            onToggleSelect={toggleSelect}
+            showCheckbox={isSuperAdmin}
+          />
         ))}
       </div>
+
+      {/* ── Confirmation Dialogs ── */}
+      {confirmDialog === 'selected' && (
+        <ConfirmDialog
+          title={`Delete ${selectedIds.size} Selected ${selectedIds.size === 1 ? 'Entry' : 'Entries'}?`}
+          message={`You are about to permanently delete ${selectedIds.size} audit log ${selectedIds.size === 1 ? 'entry' : 'entries'}. This cannot be undone.`}
+          onConfirm={doDeleteSelected}
+          onCancel={() => setConfirmDialog(null)}
+          isDanger
+        />
+      )}
+
+      {confirmDialog === 'all' && (
+        <ConfirmDialog
+          title="Wipe Entire Audit Log?"
+          message={`This will permanently delete ALL ${allEntries.length} audit log entries. The complete history of every action ever performed in the app will be erased. This cannot be undone.`}
+          onConfirm={doWipeAll}
+          onCancel={() => setConfirmDialog(null)}
+          isDanger
+        />
+      )}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

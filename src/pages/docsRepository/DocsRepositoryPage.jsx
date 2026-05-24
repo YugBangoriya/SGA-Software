@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 // ─────────────────────────────────────────────────────────
 //  src/pages/DocsRepository/DocsRepositoryPage.jsx
 //
@@ -153,13 +154,16 @@ export default function DocsRepositoryPage() {
       >
         {/* Title row */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <HomeButton />
+            <div>
             <h1 style={{ margin: 0, color: "#FFFFFF", fontSize: 22, fontWeight: 700 }}>
               Docs Repository
             </h1>
             <p style={{ margin: "3px 0 0", color: "#F0BABA", fontSize: 13 }}>
               {documents.length} {documents.length === 1 ? "document" : "documents"} stored
             </p>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {/* Category manager */}

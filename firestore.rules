@@ -1,5 +1,21 @@
+// SGA — Last updated: Fixed 3 rule bugs — followUpTemplates missing rule, invoiceDbLocked wrong doc ID, auditLog SuperAdmin delete
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.0 | Last Audited: Phase 12 Launch Review
+// Version: 1.1 | Post-Launch Fix
+//
+// ── CHANGES FROM v1.0 ────────────────────────────────────────────────────
+//   FIX 1 — invoiceDbLocked() function pointed to systemConfig/config but
+//            the actual document is systemConfig/main. Changed to 'main'.
+//
+//   FIX 2 — /followUpTemplates collection had NO rule (fell to DENY ALL).
+//            settingsService.js reads this collection on every settings page
+//            load. The permission error caused Promise.all to reject, leaving
+//            initialized=false, which triggered an infinite reload loop in
+//            SettingsPage. Added rule: Owner+ can read/write.
+//
+//   FIX 3 — /auditLog delete permission added for SuperAdmin only.
+//            Required for the new "Delete Audit Logs" feature (client request).
+//            The rule change is intentional and deliberate — only SuperAdmin
+//            can delete. All other roles remain blocked from delete/update.
 //
 // ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
 //   superadmin  → God-mode. Manages users, backups, car repo, system config.
@@ -7,16 +23,17 @@
 //   employee    → Limited: create pending invoices, view customers/inventory.
 //   (accountant → placeholder, not implemented in v1)
 //
-// ── AUDIT CHECKLIST (all verified in this file) ──────────────────────────
+// ── AUDIT CHECKLIST ──────────────────────────────────────────────────────
 //   [✓] Employees cannot read quotations
 //   [✓] Employees cannot read messaging/conversations
 //   [✓] Employees cannot read financial reports
 //   [✓] Invoice DB lock (systemConfig.invoiceDbLocked) enforced at rule level
-//   [✓] AuditLog is truly append-only — no update/delete for ANY role
+//   [✓] AuditLog: append-only for Owner/Employee; SuperAdmin can delete only
 //   [✓] SuperAdmin cannot be locked out of systemConfig
 //   [✓] Users can only modify their own theme/language preferences
 //   [✓] Car repository: write restricted to superadmin only
 //   [✓] No sensitive data accessible to unauthenticated requests
+//   [✓] followUpTemplates: Owner+ read/write (was missing — caused loading loop)
 // ─────────────────────────────────────────────────────────────────────────
 
 rules_version = '2';
@@ -53,9 +70,10 @@ service cloud.firestore {
       return isSuperAdmin() || isOwner() || isEmployee();
     }
 
-    // Is the invoice database currently locked by SuperAdmin?
+    // FIX 1: Was pointing to systemConfig/config — correct doc ID is 'main'.
+    // This bug meant the lock check always failed (doc not found → error → rule false).
     function invoiceDbLocked() {
-      return get(/databases/$(database)/documents/systemConfig/config).data.invoiceDbLocked == true;
+      return get(/databases/$(database)/documents/systemConfig/main).data.invoiceDbLocked == true;
     }
 
     // Is the requesting user operating on their own document?
@@ -145,15 +163,15 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /auditLog — Audit trail
-    // CRITICAL: APPEND-ONLY. No update or delete for ANY role.
-    // Owner+ can read. SuperAdmin can read all.
+    // FIX 3: Added delete for SuperAdmin only (new client feature request).
+    // Owner+ can read. Any staff can create (append). No one can update.
+    // SuperAdmin can delete individual entries OR wipe the entire collection.
     // ──────────────────────────────────────────────────────────
     match /auditLog/{logId} {
       allow read:   if isOwnerOrAbove();
       allow create: if isAnyStaff();    // Any staff can create log entries
-      // NO update rule
-      // NO delete rule
-      // This is intentional and enforces the append-only audit trail requirement.
+      allow delete: if isSuperAdmin();  // SuperAdmin can delete entries (new feature)
+      // NO update rule — immutable once written (except SuperAdmin delete)
     }
 
     // ──────────────────────────────────────────────────────────
@@ -162,6 +180,19 @@ service cloud.firestore {
     // ──────────────────────────────────────────────────────────
     match /followUps/{followUpId} {
       allow read, write: if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /followUpTemplates — Follow-up message templates (EN/HI/GU)
+    // FIX 2: This collection was MISSING a rule — fell to DENY ALL.
+    // settingsService.js reads this on every settings page load, causing a
+    // permission error that broke the settings initialization in production.
+    // Owner+ can read and write (same permissions as /messageTemplates).
+    // ──────────────────────────────────────────────────────────
+    match /followUpTemplates/{templateId} {
+      allow read:           if isOwnerOrAbove();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
     }
 
     // ──────────────────────────────────────────────────────────
@@ -232,7 +263,7 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /messageTemplates — Follow-up message templates (EN/HI/GU)
+    // /messageTemplates — Follow-up message templates (legacy collection name)
     // Owner+ can read and write.
     // ──────────────────────────────────────────────────────────
     match /messageTemplates/{templateId} {

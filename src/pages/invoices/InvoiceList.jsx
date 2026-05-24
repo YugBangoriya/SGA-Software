@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 // ============================================================
 // InvoiceList.jsx — Invoice list + Pending Approvals section
 // Phase 4 — Shree Ganesh Automobile
@@ -16,6 +17,7 @@ import InvoiceCard from "../../components/invoices/InvoiceCard";
 import InvoiceStatusBadge from "../../components/invoices/InvoiceStatusBadge";
 import DBLockedBanner from "../../components/invoices/DBLockedBanner";
 import { formatCurrency, formatDate } from "../../lib/invoiceHelpers";
+import HomeButton from "../../components/ui/HomeButton";
 
 const STATUS_FILTERS = [
   { value: "ALL", label: "All" },
@@ -141,7 +143,9 @@ export default function InvoiceList() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <HomeButton />
+            <div>
             <h1 style={{ color: "#FFFFFF", fontSize: 22, fontWeight: 700, margin: 0 }}>
               Invoices
             </h1>
@@ -152,6 +156,7 @@ export default function InvoiceList() {
                   {pendingInvoices.length} pending
                 </span>
               )}
+            </div>
             </div>
           </div>
           {(isOwnerOrAbove || role === "employee") && (

@@ -1,6 +1,21 @@
+// SGA — Last updated: Fixed infinite loading loop — added loading guard + sets initialized:true on catch
 // src/store/settingsStore.js
 // Zustand store — single source of truth for all settings across the app.
 // Every module that reads GST, dropdowns, business info, etc. uses this store.
+//
+// FIX (Post-Launch):
+//   initSettings had no guard against concurrent calls. If the followUpTemplates
+//   collection threw a permission error (missing Firestore rule), initialized
+//   was never set to true. Every child component that mounted called initSettings
+//   again (since initialized=false), which set loading=true, causing SettingsPage
+//   to flash back to the loading screen, unmounting all children — creating an
+//   infinite flip-flop loop in production.
+//
+//   Fix applied:
+//   1. Added `|| get().loading` to the guard so concurrent calls are ignored.
+//   2. Added `set({ initialized: true })` in the catch block — on failure the
+//      store falls back to defaults (safe) but never retries in a tight loop.
+//   3. followUpTemplates Firestore rule also added (see firestore.rules).
 
 import { create } from "zustand";
 import {
@@ -25,7 +40,10 @@ const useSettingsStore = create((set, get) => ({
 
   /** Call once on app boot (in App.jsx or a root component) */
   initSettings: async () => {
-    if (get().initialized) return;
+    // FIX: also guard on loading to prevent concurrent calls from multiple
+    // child components that each call useSettings() on mount.
+    if (get().initialized || get().loading) return;
+
     set({ loading: true });
     try {
       const [settings, systemConfig, customFields, followUpTemplates] = await Promise.all([
@@ -43,6 +61,9 @@ const useSettingsStore = create((set, get) => ({
       });
     } catch (err) {
       console.error("Failed to init settings:", err);
+      // FIX: always mark initialized even on error — prevents retry loops.
+      // The store will use DEFAULT_SETTINGS / DEFAULT_SYSTEM_CONFIG as fallback.
+      set({ initialized: true });
     } finally {
       set({ loading: false });
     }

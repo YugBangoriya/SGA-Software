@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * ReminderLog.jsx
  * Phase 9 — CNG Re-Testing Reminder Log Screen (Owner only)
@@ -470,6 +471,7 @@ export default function ReminderLog() {
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <HomeButton variant="light" />
               <span style={{ color: c.primary }}><BellIcon /></span>
               <div>
                 <h1 style={{ fontFamily: FONTS.heading, fontSize: 22, fontWeight: 700, color: c.textPrimary, margin: 0 }}>

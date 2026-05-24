@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * ReportingHub.jsx
  * Owner + SuperAdmin. Navigation screen for all reporting & analytics views.
@@ -17,6 +18,7 @@ import {
   Shield, ChevronRight, BarChart2,
 } from 'lucide-react';
 import useAuthStore from '@/store/authStore';
+import HomeButton from '../../components/ui/HomeButton';
 
 const REPORTS = [
   {
@@ -92,6 +94,7 @@ export default function ReportingHub() {
         padding: '24px 20px 20px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <HomeButton />
           <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <BarChart2 size={22} color="#FFFFFF" />
           </div>

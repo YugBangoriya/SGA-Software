@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for quick home navigation
 /**
  * CarRepositoryAdmin.jsx
  * Shree Ganesh Automobile — Phase 6: Car Repository
@@ -631,13 +632,16 @@ export default function CarRepositoryAdmin({ isDark }) {
       }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <HomeButton />
+              <div>
               <div style={{ color: '#F5D0D0', fontSize: 10, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 3 }}>
                 SuperAdmin · Car Repository
               </div>
               <h1 style={{ color: C.white, fontSize: 22, fontWeight: 800, margin: 0 }}>
                 🚗 Car Repository
               </h1>
+              </div>
             </div>
             <button
               onClick={() => setAddingCompany(true)}
