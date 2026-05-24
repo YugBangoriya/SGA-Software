@@ -549,13 +549,14 @@ export default function AuditLogViewer() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <HomeButton />
           <div>
-          <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
-            Audit Log
-          </h2>
-          <p style={{ color: '#F0BABA', fontSize: 12, margin: '2px 0 0', fontFamily: 'system-ui' }}>
-            {loading ? 'Loading…' : `${allEntries.length} total entries`}
-            {filters.search || filters.userId || filters.action ? ` · ${entries.length} shown` : ''}
-          </p>
+            <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
+              Audit Log
+            </h2>
+            <p style={{ color: '#F0BABA', fontSize: 12, margin: '2px 0 0', fontFamily: 'system-ui' }}>
+              {loading ? 'Loading…' : `${allEntries.length} total entries`}
+              {filters.search || filters.userId || filters.action ? ` · ${entries.length} shown` : ''}
+            </p>
+          </div>
         </div>
 
         {/* Action buttons */}
