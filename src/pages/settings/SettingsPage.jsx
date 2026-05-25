@@ -1,20 +1,39 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Fixed 2 crash bugs — added missing HomeButton import + moved JSX out of module-level constant
 // src/pages/settings/SettingsPage.jsx
 // Master Settings shell — role-based tab navigation, renders all settings panels.
 // SuperAdmin sees: SuperAdmin + Owner + User sections (god-mode).
 // Owner sees: Owner + User sections.
 // Employee sees: User section only.
 //
-// FIX (Phase 11):
+// FIX 1 (Crash — Blank Screen):
+//   HomeButton was USED at line 145 but never IMPORTED. This caused a
+//   ReferenceError: "HomeButton is not defined" on every render of SettingsPage,
+//   which crashed the entire React tree (no ErrorBoundary existed yet), resulting
+//   in a completely blank screen. Fix: added the missing import.
+//
+// FIX 2 (Crash — Stale JSX / Hoisting):
+//   ALL_TABS was a module-level constant containing pre-instantiated JSX elements:
+//   { component: <UserManagement /> }. This is wrong for two reasons:
+//   (a) CarRepoLink was referenced in ALL_TABS before its definition in the file
+//       (function declarations are hoisted but this can still cause issues with
+//       React's JSX transform in certain bundler configurations).
+//   (b) Pre-instantiated JSX elements are created ONCE at import time and reused
+//       across every render — they never re-render, receive no fresh props/context,
+//       and can throw if their own hooks fail on that first creation. Any error
+//       in any single child component at module-init time crashes the whole page.
+//   Fix: ALL_TABS now stores component REFERENCES (UserManagement, not <UserManagement />).
+//   The JSX is created fresh in the render function where React can catch errors
+//   properly, and the ErrorBoundary in App.jsx provides final fallback.
+//
+// FIX 3 (Phase 11 — role bug, documented in original file):
 //   Was using useAuthStore((s) => s.user) — but the store does NOT expose a
-//   `user` property. The store exposes `role` (string) and `userDoc` (Firestore
-//   doc) as separate top-level fields. This caused `role` to be undefined for
-//   every logged-in user, defaulting to "employee", so SuperAdmin and Owner
-//   only ever saw the "My Account" tab and never their respective admin sections.
-//   Fix: read `role` directly from the store via useAuthStore((s) => s.role).
+//   `user` property. Fixed to read `role` directly.
 
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+
+// HomeButton — was missing from imports (caused crash on every Settings render)
+import HomeButton from "../../components/ui/HomeButton";
 
 // SuperAdmin components
 import UserManagement from "./UserManagement";
@@ -36,6 +55,13 @@ import { useSettings } from "../../hooks/useSettings";
 import useAuthStore from "../../store/authStore";
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
+//
+// FIX: Store component REFERENCES, not JSX instances.
+// JSX instances (<UserManagement />) created at module level are shared across
+// renders, never re-render, and can throw errors that crash the whole page.
+// Using component references means each section gets a fresh JSX element per
+// render, which React handles safely and the ErrorBoundary can catch.
+//
 const ALL_TABS = [
   {
     id: "superadmin",
@@ -43,10 +69,10 @@ const ALL_TABS = [
     icon: "🛡️",
     roles: ["superadmin"],
     sections: [
-      { id: "users",        label: "User Management",       icon: "👥", component: <UserManagement /> },
-      { id: "invoicedb",    label: "Invoice DB Controls",   icon: "🔒", component: <InvoiceDBControls /> },
-      { id: "carrepo",      label: "Car Repository",        icon: "🚗", component: <CarRepoLink /> },
-      { id: "customfields", label: "Custom Fields",         icon: "🧩", component: <CustomFieldsManager /> },
+      { id: "users",        label: "User Management",       icon: "👥", Component: UserManagement },
+      { id: "invoicedb",    label: "Invoice DB Controls",   icon: "🔒", Component: InvoiceDBControls },
+      { id: "carrepo",      label: "Car Repository",        icon: "🚗", Component: CarRepoLink },
+      { id: "customfields", label: "Custom Fields",         icon: "🧩", Component: CustomFieldsManager },
     ],
   },
   {
@@ -55,12 +81,12 @@ const ALL_TABS = [
     icon: "🏢",
     roles: ["superadmin", "owner"],
     sections: [
-      { id: "bizinfo",   label: "Business Information",        icon: "🏢", component: <BusinessInfo /> },
-      { id: "gst",       label: "GST Settings",               icon: "📋", component: <GSTSettings /> },
-      { id: "lowstock",  label: "Low Stock Default",          icon: "📦", component: <LowStockDefault /> },
-      { id: "dropdowns", label: "Dropdown Values",            icon: "📝", component: <DropdownManager /> },
-      { id: "templates", label: "Follow-Up Templates",        icon: "✉️", component: <FollowUpTemplates /> },
-      { id: "terms",     label: "Invoice Terms & Conditions", icon: "📄", component: <TermsAndConditions /> },
+      { id: "bizinfo",   label: "Business Information",        icon: "🏢", Component: BusinessInfo },
+      { id: "gst",       label: "GST Settings",               icon: "📋", Component: GSTSettings },
+      { id: "lowstock",  label: "Low Stock Default",          icon: "📦", Component: LowStockDefault },
+      { id: "dropdowns", label: "Dropdown Values",            icon: "📝", Component: DropdownManager },
+      { id: "templates", label: "Follow-Up Templates",        icon: "✉️", Component: FollowUpTemplates },
+      { id: "terms",     label: "Invoice Terms & Conditions", icon: "📄", Component: TermsAndConditions },
     ],
   },
   {
@@ -69,9 +95,9 @@ const ALL_TABS = [
     icon: "👤",
     roles: ["superadmin", "owner", "employee", "accountant"],
     sections: [
-      { id: "theme",    label: "Theme",           icon: "🌙", component: <ThemeToggle /> },
-      { id: "language", label: "Language",        icon: "🌐", component: <LanguageToggle /> },
-      { id: "password", label: "Change Password", icon: "🔑", component: <ChangePassword /> },
+      { id: "theme",    label: "Theme",           icon: "🌙", Component: ThemeToggle },
+      { id: "language", label: "Language",        icon: "🌐", Component: LanguageToggle },
+      { id: "password", label: "Change Password", icon: "🔑", Component: ChangePassword },
     ],
   },
 ];
@@ -80,8 +106,6 @@ export default function SettingsPage() {
   const { loading } = useSettings();
 
   // FIX: read `role` directly — the store does NOT have a `user` property.
-  // Previously: const user = useAuthStore((s) => s.user); role = user?.role
-  // This returned undefined because `s.user` doesn't exist in authStore.js.
   const role = useAuthStore((s) => s.role) || "employee";
 
   const visibleTabs = ALL_TABS.filter((tab) => tab.roles.includes(role));
@@ -264,10 +288,11 @@ export default function SettingsPage() {
           </div>
 
           {/* Main Content */}
+          {/* FIX: render <Component /> fresh per-render instead of {sec.component} (stale pre-built JSX) */}
           <div>
             {sections.map((sec) => (
               <div key={sec.id} id={`section-${sec.id}`}>
-                {sec.component}
+                <sec.Component />
               </div>
             ))}
           </div>
@@ -278,6 +303,11 @@ export default function SettingsPage() {
 }
 
 // ─── Car Repository Link Component ───────────────────────────────────────────
+// NOTE: This is defined AFTER it's referenced in ALL_TABS above.
+// This is safe because ALL_TABS is evaluated at module execution time (not
+// parse time), and by execution time all function declarations in the module
+// are already hoisted. The JSX <CarRepoLink /> is only created inside the
+// render function now (via <sec.Component />), not at module init time.
 function CarRepoLink() {
   const navigate = useNavigate();
 

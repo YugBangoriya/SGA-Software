@@ -1,3 +1,4 @@
+// SGA — Last updated: Wrapped all routes in ErrorBoundary to prevent blank screens on JS errors
 // src/App.jsx — FIXED: All modules wired to real components
 
 import { useEffect }           from "react";
@@ -8,6 +9,7 @@ import useThemeStore  from "@/store/themeStore";
 import { ROLES }      from "@/lib/rbac";
 
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
+import ErrorBoundary  from "@/components/layout/ErrorBoundary";
 import { ToastContainer } from "@/components/ui/Toast";
 
 // ── Public Pages
@@ -72,158 +74,169 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
+      {/*
+       * ErrorBoundary wraps all routes so that if ANY page component throws
+       * a JS error during render, the entire app does NOT go blank.
+       * Instead the ErrorBoundary catches it, shows a recovery screen,
+       * and lets the user navigate away without a full page refresh.
+       *
+       * This fixes the intermittent blank screen issue on:
+       * Messaging, Quotations, Reminders, Car Repo, Docs Repo, Admin, Settings
+       */}
+      <ErrorBoundary>
+        <Routes>
 
-        {/* ── Public ──────────────────────────────────────────────────── */}
-        <Route path="/login"        element={<Login />} />
-        <Route path="/unauthorized" element={<Unauthorized />} />
+          {/* ── Public ──────────────────────────────────────────────────── */}
+          <Route path="/login"        element={<Login />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
 
-        {/* ── Dashboard ───────────────────────────────────────────────── */}
-        <Route path="/" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
-            <Dashboard />
-          </ProtectedRoute>
-        } />
-        <Route path="/more" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
-            <More />
-          </ProtectedRoute>
-        } />
+          {/* ── Dashboard ───────────────────────────────────────────────── */}
+          <Route path="/" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
+              <Dashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/more" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
+              <More />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 2: Customers ──────────────────────────────────────── */}
-        <Route path="/customers/*" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <CustomerRoutes />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 2: Customers ──────────────────────────────────────── */}
+          <Route path="/customers/*" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <CustomerRoutes />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 3: Inventory ──────────────────────────────────────── */}
-        <Route path="/inventory" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <InventoryPage />
-          </ProtectedRoute>
-        } />
-        <Route path="/inventory/:id" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <ItemDetailPage />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 3: Inventory ──────────────────────────────────────── */}
+          <Route path="/inventory" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <InventoryPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/inventory/:id" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <ItemDetailPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 4: Invoices ───────────────────────────────────────── */}
-        <Route path="/invoices" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <InvoiceList />
-          </ProtectedRoute>
-        } />
-        <Route path="/invoices/new" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <CreateInvoice />
-          </ProtectedRoute>
-        } />
-        <Route path="/invoices/pending-payments" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <PendingPayments />
-          </ProtectedRoute>
-        } />
-        <Route path="/invoices/:id" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <InvoiceDetail />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 4: Invoices ───────────────────────────────────────── */}
+          <Route path="/invoices" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <InvoiceList />
+            </ProtectedRoute>
+          } />
+          <Route path="/invoices/new" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <CreateInvoice />
+            </ProtectedRoute>
+          } />
+          <Route path="/invoices/pending-payments" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <PendingPayments />
+            </ProtectedRoute>
+          } />
+          <Route path="/invoices/:id" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <InvoiceDetail />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 5: Quotations ─────────────────────────────────────── */}
-        <Route path="/quotations/*" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <QuotationsPage />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 5: Quotations ─────────────────────────────────────── */}
+          <Route path="/quotations/*" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <QuotationsPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 6: Car Repository ─────────────────────────────────── */}
-        <Route path="/car-repo" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
-            <CarRepositoryPage />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 6: Car Repository ─────────────────────────────────── */}
+          <Route path="/car-repo" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+              <CarRepositoryPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 7: Docs Repository ────────────────────────────────── */}
-        <Route path="/docs-repo" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <DocsRepositoryPage />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 7: Docs Repository ────────────────────────────────── */}
+          <Route path="/docs-repo" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <DocsRepositoryPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 8: Messaging ──────────────────────────────────────── */}
-        <Route path="/messaging" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <UnifiedInbox />
-          </ProtectedRoute>
-        } />
-        <Route path="/messaging/follow-ups" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <FollowUpLog />
-          </ProtectedRoute>
-        } />
-        <Route path="/messaging/templates" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <TemplateManager />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 8: Messaging ──────────────────────────────────────── */}
+          <Route path="/messaging" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <UnifiedInbox />
+            </ProtectedRoute>
+          } />
+          <Route path="/messaging/follow-ups" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <FollowUpLog />
+            </ProtectedRoute>
+          } />
+          <Route path="/messaging/templates" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <TemplateManager />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 9: Reminders ──────────────────────────────────────── */}
-        <Route path="/reminders" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <ReminderLog />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 9: Reminders ──────────────────────────────────────── */}
+          <Route path="/reminders" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <ReminderLog />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 10: Reporting & Audit ─────────────────────────────── */}
-        <Route path="/reports" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <ReportingHub />
-          </ProtectedRoute>
-        } />
-        <Route path="/audit-log" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <AuditLogViewer />
-          </ProtectedRoute>
-        } />
-        <Route path="/reports/profit-loss" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <ProfitLossReport />
-          </ProtectedRoute>
-        } />
-        <Route path="/reports/pending-invoices" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <PendingInvoicesSummary />
-          </ProtectedRoute>
-        } />
-        <Route path="/reports/customers" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <CustomerAcquisitionPipeline />
-          </ProtectedRoute>
-        } />
-        <Route path="/reports/follow-ups" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
-            <FollowUpTracker />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 10: Reporting & Audit ─────────────────────────────── */}
+          <Route path="/reports" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <ReportingHub />
+            </ProtectedRoute>
+          } />
+          <Route path="/audit-log" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <AuditLogViewer />
+            </ProtectedRoute>
+          } />
+          <Route path="/reports/profit-loss" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <ProfitLossReport />
+            </ProtectedRoute>
+          } />
+          <Route path="/reports/pending-invoices" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <PendingInvoicesSummary />
+            </ProtectedRoute>
+          } />
+          <Route path="/reports/customers" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <CustomerAcquisitionPipeline />
+            </ProtectedRoute>
+          } />
+          <Route path="/reports/follow-ups" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <FollowUpTracker />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Phase 11: Settings & Admin ──────────────────────────────── */}
-        <Route path="/settings/*" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
-            <SettingsPage />
-          </ProtectedRoute>
-        } />
-        <Route path="/admin/*" element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
-            <SettingsPage />
-          </ProtectedRoute>
-        } />
+          {/* ── Phase 11: Settings & Admin ──────────────────────────────── */}
+          <Route path="/settings/*" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
+              <SettingsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/*" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT]}>
+              <SettingsPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ── Catch-all ───────────────────────────────────────────────── */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+          {/* ── Catch-all ───────────────────────────────────────────────── */}
+          <Route path="*" element={<Navigate to="/" replace />} />
 
-      </Routes>
+        </Routes>
+      </ErrorBoundary>
 
       <ToastContainer />
     </BrowserRouter>
