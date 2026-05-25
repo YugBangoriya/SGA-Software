@@ -1,4 +1,4 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Fixed crash — added missing HomeButton import (was used but never imported)
 // ─────────────────────────────────────────────────────────
 //  src/pages/DocsRepository/DocsRepositoryPage.jsx
 //
@@ -21,6 +21,7 @@ import UploadModal from "./UploadModal";
 import PreviewModal from "./PreviewModal";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import CategoryManager from "./CategoryManager";
+import HomeButton from '../../components/ui/HomeButton';
 
 export default function DocsRepositoryPage() {
   const { role: userRole, userDoc: userData } = useAuthStore();

@@ -1,4 +1,4 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Fixed crash — added missing HomeButton import (was used but never imported)
 /**
  * ReminderLog.jsx
  * Phase 9 — CNG Re-Testing Reminder Log Screen (Owner only)
@@ -24,6 +24,7 @@ import { fmtDate, fmtDateTime, getReminderLabel, getReminderVariant }
   from '../../lib/reminderService';
 import useReminderStore  from '../../store/reminderStore';
 import MarkRetestedModal from './MarkRetestedModal';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const BellIcon = () => (

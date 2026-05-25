@@ -1,4 +1,4 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Fixed crash — added missing HomeButton import (was used but never imported)
 /**
  * CarRepositoryAdmin.jsx
  * Shree Ganesh Automobile — Phase 6: Car Repository
@@ -9,6 +9,7 @@
 import { useState, useRef } from 'react';
 import { useCarRepository } from '../../hooks/useCarRepository';
 import { useCarRepoNotifications } from '../../hooks/useCarRepository';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ─── Design tokens (from Design Document) ────────────────────────────────────
 const C = {

@@ -1,4 +1,4 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Fixed crash — added missing HomeButton import (was used but never imported)
 /**
  * UnifiedInbox — Main container for Phase 8 Unified Messaging.
  *
@@ -25,6 +25,7 @@ import ChatView from "./ChatView";
 import NotesPanel from "./NotesPanel";
 import DocsPanel from "./DocsPanel";
 import FollowUpScheduler from "./FollowUpScheduler";
+import HomeButton from '../../components/ui/HomeButton';
 
 // ─── Platform badge icons (used across components) ───────────────────────────
 export function PlatformBadge({ platform, size = "sm" }) {
