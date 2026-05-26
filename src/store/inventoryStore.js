@@ -1,9 +1,13 @@
+// SGA — Last updated: Added deleteItem action + fixed fetchItem error state (no more stuck loading)
 /**
  * Inventory Store — Shree Ganesh Automobile
  * Zustand global state for the Inventory module.
  *
- * All Firestore calls are delegated to inventoryService.js.
- * Components call store actions; they never call Firestore directly.
+ * FIX: fetchItem now tracks a separate `itemError` field.
+ * Previously if getInventoryItem() threw, `loading` became false but
+ * `selectedItem` stayed null — causing ItemDetailPage to show "Loading item..."
+ * forever (the condition was `loading || !selectedItem`).
+ * Now the detail page can distinguish "still loading" from "load failed".
  */
 
 import { create } from 'zustand';
@@ -20,22 +24,25 @@ import {
   addCategory,
   updateCategory,
   deleteCategory,
+  deleteInventoryItem,
 } from '../lib/inventoryService';
 
 const useInventoryStore = create((set, get) => ({
   // ─── State ─────────────────────────────────────────────────────────────
-  items:           [],        // all inventory items (sorted by name)
-  categories:      [],        // all categories
-  lowStockItems:   [],        // items at or below their threshold
-  selectedItem:    null,      // item currently open in detail view
-  restockHistory:  [],        // restock history for selectedItem
+  items:           [],
+  categories:      [],
+  lowStockItems:   [],
+  selectedItem:    null,
+  restockHistory:  [],
 
-  loading:         false,     // main items loading spinner
-  historyLoading:  false,     // restock history loading
+  loading:           false,   // list-level loading
+  itemLoading:       false,   // item detail loading (separate from list)
+  itemError:         null,    // item detail fetch error (null = no error)
+  historyLoading:    false,
   categoriesLoading: false,
-  error:           null,      // last error message (string | null)
+  error:             null,
 
-  // ─── Fetch Items ───────────────────────────────────────────────────────
+  // ─── Fetch Items (list) ────────────────────────────────────────────────
 
   fetchItems: async () => {
     set({ loading: true, error: null });
@@ -50,13 +57,16 @@ const useInventoryStore = create((set, get) => ({
     }
   },
 
+  // FIX: uses `itemLoading` + `itemError` instead of shared `loading`.
+  // ItemDetailPage checks `itemLoading || (!selectedItem && !itemError)`
+  // so a fetch failure no longer leaves the page stuck on the spinner.
   fetchItem: async (itemId) => {
-    set({ loading: true, error: null });
+    set({ itemLoading: true, itemError: null, selectedItem: null });
     try {
       const item = await getInventoryItem(itemId);
-      set({ selectedItem: item, loading: false });
+      set({ selectedItem: item, itemLoading: false });
     } catch (err) {
-      set({ error: err.message, loading: false });
+      set({ itemError: err.message, itemLoading: false });
     }
   },
 
@@ -78,11 +88,10 @@ const useInventoryStore = create((set, get) => ({
       set({ restockHistory, historyLoading: false });
     } catch (err) {
       console.error('[InventoryStore] fetchRestockHistory failed:', err);
-      set({ historyLoading: false });
+      set({ historyLoading: false, restockHistory: [] });
     }
   },
 
-  // Convenience: refresh low-stock list without full re-fetch
   refreshLowStock: async () => {
     try {
       const lowStockItems = await getLowStockItems();
@@ -96,14 +105,12 @@ const useInventoryStore = create((set, get) => ({
 
   addItem: async (itemData, user) => {
     await addInventoryItem({ itemData, user });
-    // Refresh items and low-stock list after add
     await get().fetchItems();
   },
 
   replenishItem: async (itemId, replenishData, user) => {
     await replenishInventoryItem({ itemId, replenishData, user });
     await get().fetchItems();
-    // If detail view is open for this item, refresh it too
     if (get().selectedItem?.id === itemId) {
       await get().fetchItem(itemId);
       await get().fetchRestockHistory(itemId);
@@ -126,6 +133,22 @@ const useInventoryStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Delete one or more inventory items.
+   * Removes them optimistically from the local items list immediately.
+   * @param {string[]} ids  — Firestore document IDs to delete
+   * @param {object}   user — Firebase Auth user object (for audit log)
+   */
+  deleteItems: async (ids, user) => {
+    // Optimistic removal from local list
+    set((state) => ({
+      items:         state.items.filter((item) => !ids.includes(item.id)),
+      lowStockItems: state.lowStockItems.filter((item) => !ids.includes(item.id)),
+    }));
+    // Fire all deletes in parallel
+    await Promise.all(ids.map((id) => deleteInventoryItem(id, user)));
+  },
+
   // ─── Mutations — Categories ────────────────────────────────────────────
 
   addCategory: async (name, user) => {
@@ -145,11 +168,11 @@ const useInventoryStore = create((set, get) => ({
 
   // ─── Local UI State ────────────────────────────────────────────────────
 
-  setSelectedItem: (item) => set({ selectedItem: item, restockHistory: [] }),
-  clearSelectedItem: ()   => set({ selectedItem: null, restockHistory: [] }),
+  setSelectedItem: (item) => set({ selectedItem: item, restockHistory: [], itemError: null }),
+  clearSelectedItem: ()   => set({ selectedItem: null, restockHistory: [], itemError: null }),
   clearError: ()          => set({ error: null }),
+  clearItemError: ()      => set({ itemError: null }),
 
-  // Utility: get category name by ID (for display)
   getCategoryName: (categoryId) => {
     if (!categoryId) return '—';
     const cat = get().categories.find((c) => c.id === categoryId);

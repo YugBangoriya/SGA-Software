@@ -1,3 +1,4 @@
+// SGA — Last updated: Added deleteInventoryItem function for individual item deletion feature
 /**
  * Inventory Service — Shree Ganesh Automobile
  * All Firestore read/write operations for the Inventory module.
@@ -5,7 +6,6 @@
  * CRITICAL RULE (from PRD §3.5.3):
  *   Inventory quantity is NEVER deducted here during invoice creation.
  *   Deduction happens ONLY when an Owner approves an invoice (Phase 4).
- *   This file exposes deductInventoryForInvoice() for Phase 4 to call.
  *
  * Collections:
  *   /inventory                  — main item documents
@@ -20,55 +20,42 @@ import {
   updateDoc,
   getDoc,
   getDocs,
+  deleteDoc,
   query,
   orderBy,
   serverTimestamp,
   increment,
   runTransaction,
   where,
-  deleteDoc,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { logAudit, AUDIT_ACTIONS } from './auditService';
+import { logAudit } from './auditService';
 
 const INV  = 'inventory';
 const CATS = 'inventoryCategories';
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 const toTimestamp = (dateStr) =>
-  dateStr
-    ? Timestamp.fromDate(new Date(dateStr))
-    : null; // null signals "use serverTimestamp()" at the call site
+  dateStr ? Timestamp.fromDate(new Date(dateStr)) : null;
 
 const docToItem = (snap) => ({ id: snap.id, ...snap.data() });
 
-// ─── READ ──────────────────────────────────────────────────────────────────
+// ─── READ ──────────────────────────────────────────────────────────────────────
 
-/**
- * Fetch all inventory items ordered by name.
- * Accessible to Owner, Employee, and SuperAdmin.
- */
 export const getInventoryItems = async () => {
   const q = query(collection(db, INV), orderBy('itemName', 'asc'));
   const snap = await getDocs(q);
   return snap.docs.map(docToItem);
 };
 
-/**
- * Fetch a single inventory item by ID.
- */
 export const getInventoryItem = async (itemId) => {
   const snap = await getDoc(doc(db, INV, itemId));
   if (!snap.exists()) throw new Error('Item not found');
   return docToItem(snap);
 };
 
-/**
- * Fetch all restock history entries for a given item, newest first.
- * Used by the Item Detail screen.
- */
 export const getRestockHistory = async (itemId) => {
   const q = query(
     collection(db, INV, itemId, 'restockHistory'),
@@ -78,36 +65,23 @@ export const getRestockHistory = async (itemId) => {
   return snap.docs.map(docToItem);
 };
 
-/**
- * Return all items currently at or below their low-stock threshold.
- * Used to generate in-app alerts for the Owner.
- */
 export const getLowStockItems = async () => {
   const items = await getInventoryItems();
   return items.filter((item) => item.quantity <= (item.lowStockThreshold ?? 5));
 };
 
-// ─── ADD NEW ITEM (Owner / SuperAdmin only) ────────────────────────────────
+// ─── ADD NEW ITEM (Owner / SuperAdmin only) ────────────────────────────────────
 
-/**
- * Add a brand-new inventory item.
- * Also creates the first entry in the restockHistory subcollection.
- *
- * @param {object} params
- * @param {object} params.itemData  — form values
- * @param {object} params.user      — Firebase Auth user object
- * @returns {string} — newly created item document ID
- */
 export const addInventoryItem = async ({ itemData, user }) => {
   const {
     itemName,
     categoryId,
     quantityAdded,
     purchasePrice,
-    dateOrderedOrReceived,   // ISO date string from <input type="date">
+    dateOrderedOrReceived,
     vendorName,
     lowStockThreshold,
-    isDateManuallySet,       // true if user changed from today's default
+    isDateManuallySet,
     notes,
   } = itemData;
 
@@ -119,7 +93,7 @@ export const addInventoryItem = async ({ itemData, user }) => {
     itemName:              itemName.trim(),
     categoryId:            categoryId || '',
     quantity:              Number(quantityAdded),
-    purchasePrice:         Number(purchasePrice),       // price per unit, latest batch
+    purchasePrice:         Number(purchasePrice),
     lowStockThreshold:     Number(lowStockThreshold) || 5,
     vendorName:            vendorName?.trim() || '',
     lastRestockedDate:     orderTimestamp,
@@ -132,10 +106,8 @@ export const addInventoryItem = async ({ itemData, user }) => {
     lastUpdatedBy:         user.uid,
   };
 
-  // Write parent document
   const itemRef = await addDoc(collection(db, INV), newItem);
 
-  // Write first restock history entry (same data as initial stock)
   await addDoc(collection(db, INV, itemRef.id, 'restockHistory'), {
     date:             orderTimestamp,
     quantityAdded:    Number(quantityAdded),
@@ -146,11 +118,11 @@ export const addInventoryItem = async ({ itemData, user }) => {
     addedByName:      user.displayName || user.email,
     addedAt:          serverTimestamp(),
     isDateManuallySet: isDateManuallySet ?? false,
-    entryType:        'INITIAL', // distinguish from replenishments
+    entryType:        'INITIAL',
   });
 
   await logAudit({
-    action:            AUDIT_ACTIONS.INVENTORY_ADD,
+    action:            'inventory.added',
     userId:            user.uid,
     userName:          user.displayName || user.email,
     targetId:          itemRef.id,
@@ -166,18 +138,8 @@ export const addInventoryItem = async ({ itemData, user }) => {
   return itemRef.id;
 };
 
-// ─── REPLENISH EXISTING ITEM (Owner / SuperAdmin only) ────────────────────
+// ─── REPLENISH EXISTING ITEM ──────────────────────────────────────────────────
 
-/**
- * Add stock to an existing inventory item.
- * Uses a Firestore transaction so the quantity increment is atomic.
- * Updates purchasePrice to reflect the new batch's price.
- *
- * @param {object} params
- * @param {string} params.itemId
- * @param {object} params.replenishData — form values
- * @param {object} params.user
- */
 export const replenishInventoryItem = async ({ itemId, replenishData, user }) => {
   const {
     quantityAdded,
@@ -192,7 +154,6 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
     ? toTimestamp(dateOrderedOrReceived)
     : serverTimestamp();
 
-  // Atomic quantity increment
   await runTransaction(db, async (transaction) => {
     const itemRef = doc(db, INV, itemId);
     const itemSnap = await transaction.get(itemRef);
@@ -209,7 +170,6 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
     });
   });
 
-  // Append restock history entry (outside transaction — non-atomic is acceptable here)
   await addDoc(collection(db, INV, itemId, 'restockHistory'), {
     date:              orderTimestamp,
     quantityAdded:     Number(quantityAdded),
@@ -224,7 +184,7 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
   });
 
   await logAudit({
-    action:           AUDIT_ACTIONS.INVENTORY_REPLENISH,
+    action:           'inventory.replenished',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         itemId,
@@ -237,13 +197,8 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
   });
 };
 
-// ─── UPDATE ITEM DETAILS (Owner / SuperAdmin only) ────────────────────────
+// ─── UPDATE ITEM DETAILS ───────────────────────────────────────────────────────
 
-/**
- * Update non-stock fields of an inventory item
- * (e.g., category, notes, item name).
- * Does NOT change quantity or restockHistory.
- */
 export const updateInventoryItem = async ({ itemId, updates, user }) => {
   const itemRef = doc(db, INV, itemId);
   await updateDoc(itemRef, {
@@ -253,7 +208,7 @@ export const updateInventoryItem = async ({ itemId, updates, user }) => {
   });
 
   await logAudit({
-    action:           AUDIT_ACTIONS.INVENTORY_UPDATE,
+    action:           'inventory.updated',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         itemId,
@@ -262,10 +217,6 @@ export const updateInventoryItem = async ({ itemId, updates, user }) => {
   });
 };
 
-/**
- * Set the low-stock threshold for a single item.
- * Triggers a re-evaluation of alert status in the store.
- */
 export const updateLowStockThreshold = async ({ itemId, threshold, user }) => {
   const itemRef = doc(db, INV, itemId);
   await updateDoc(itemRef, {
@@ -275,7 +226,7 @@ export const updateLowStockThreshold = async ({ itemId, threshold, user }) => {
   });
 
   await logAudit({
-    action:           AUDIT_ACTIONS.INVENTORY_THRESHOLD_SET,
+    action:           'inventory.threshold_updated',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         itemId,
@@ -284,22 +235,33 @@ export const updateLowStockThreshold = async ({ itemId, threshold, user }) => {
   });
 };
 
-// ─── DEDUCTION — called by Phase 4 Invoice Approval ONLY ─────────────────
+// ─── DELETE INVENTORY ITEM (Owner / SuperAdmin only) ──────────────────────────
 
 /**
- * Deduct inventory quantities when an invoice is APPROVED.
- * This function is intentionally NOT called during invoice creation.
+ * Permanently delete an inventory item document.
+ * Note: Firestore does NOT auto-delete subcollections (restockHistory).
+ * For a small number of history entries this is acceptable — orphaned
+ * subcollection docs don't cause any functional issues and are invisible
+ * to the app. A full recursive delete would require a Cloud Function.
  *
- * Called from the Invoice Module (Phase 4) after Owner approves an invoice.
- * Can be called inside an existing Firestore transaction (pass `transaction`)
- * or standalone (omit `transaction`).
- *
- * @param {object} params
- * @param {Array}  params.lineItems  — [{ itemId: string, quantity: number }]
- * @param {string} params.invoiceId  — for audit trail
- * @param {object} params.user       — Firebase Auth user
- * @param {object} [params.transaction] — optional Firestore transaction object
+ * @param {string} itemId — Firestore document ID
+ * @param {object} user   — Firebase Auth user object
  */
+export const deleteInventoryItem = async (itemId, user) => {
+  await deleteDoc(doc(db, INV, itemId));
+
+  await logAudit({
+    action:           'inventory.deleted',
+    userId:           user.uid,
+    userName:         user.displayName || user.email,
+    targetId:         itemId,
+    targetCollection: INV,
+    metadata:         {},
+  });
+};
+
+// ─── DEDUCTION — called by Invoice Approval ONLY ───────────────────────────────
+
 export const deductInventoryForInvoice = async ({
   lineItems,
   invoiceId,
@@ -322,11 +284,9 @@ export const deductInventoryForInvoice = async ({
       });
     }
   }
-
-  // Audit is handled by the Invoice module for the overall approval action
 };
 
-// ─── CATEGORIES ────────────────────────────────────────────────────────────
+// ─── CATEGORIES ────────────────────────────────────────────────────────────────
 
 export const getCategories = async () => {
   const q = query(collection(db, CATS), orderBy('name', 'asc'));
@@ -335,7 +295,6 @@ export const getCategories = async () => {
 };
 
 export const addCategory = async ({ name, user }) => {
-  // Guard: prevent duplicate names (case-insensitive)
   const existing = await getCategories();
   const isDuplicate = existing.some(
     (c) => c.name.toLowerCase() === name.trim().toLowerCase()
@@ -349,7 +308,7 @@ export const addCategory = async ({ name, user }) => {
   });
 
   await logAudit({
-    action:           AUDIT_ACTIONS.CATEGORY_ADD,
+    action:           'inventory.category_added',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         ref.id,
@@ -368,7 +327,7 @@ export const updateCategory = async ({ categoryId, newName, user }) => {
   });
 
   await logAudit({
-    action:           AUDIT_ACTIONS.CATEGORY_UPDATE,
+    action:           'inventory.category_updated',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         categoryId,
@@ -378,11 +337,7 @@ export const updateCategory = async ({ categoryId, newName, user }) => {
 };
 
 export const deleteCategory = async ({ categoryId, user }) => {
-  // Guard: cannot delete if items still reference this category
-  const usedBy = query(
-    collection(db, INV),
-    where('categoryId', '==', categoryId)
-  );
+  const usedBy = query(collection(db, INV), where('categoryId', '==', categoryId));
   const usedSnap = await getDocs(usedBy);
   if (!usedSnap.empty) {
     throw new Error(
@@ -393,7 +348,7 @@ export const deleteCategory = async ({ categoryId, user }) => {
   await deleteDoc(doc(db, CATS, categoryId));
 
   await logAudit({
-    action:           AUDIT_ACTIONS.CATEGORY_DELETE,
+    action:           'inventory.category_deleted',
     userId:           user.uid,
     userName:         user.displayName || user.email,
     targetId:         categoryId,

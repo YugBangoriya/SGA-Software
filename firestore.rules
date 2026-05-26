@@ -1,21 +1,19 @@
-// SGA — Last updated: Fixed 3 rule bugs — followUpTemplates missing rule, invoiceDbLocked wrong doc ID, auditLog SuperAdmin delete
+// SGA — Last updated: Added restockHistory subcollection rule (Bug Fix — inventory item loading hang)
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.1 | Post-Launch Fix
+// Version: 1.2 | Post-Launch Fix
 //
-// ── CHANGES FROM v1.0 ────────────────────────────────────────────────────
-//   FIX 1 — invoiceDbLocked() function pointed to systemConfig/config but
-//            the actual document is systemConfig/main. Changed to 'main'.
-//
-//   FIX 2 — /followUpTemplates collection had NO rule (fell to DENY ALL).
-//            settingsService.js reads this collection on every settings page
-//            load. The permission error caused Promise.all to reject, leaving
-//            initialized=false, which triggered an infinite reload loop in
-//            SettingsPage. Added rule: Owner+ can read/write.
-//
-//   FIX 3 — /auditLog delete permission added for SuperAdmin only.
-//            Required for the new "Delete Audit Logs" feature (client request).
-//            The rule change is intentional and deliberate — only SuperAdmin
-//            can delete. All other roles remain blocked from delete/update.
+// ── CHANGES FROM v1.1 ────────────────────────────────────────────────────
+//   FIX 4 — /inventory/{itemId}/restockHistory subcollection had NO rule.
+//            Firestore rules do NOT cascade from a parent document to its
+//            subcollections — each must be explicitly declared.
+//            Without this rule, getRestockHistory() failed in production
+//            with a permission-denied error (catch-all DENY ALL applied).
+//            The error was caught by the store, but because fetchItem()
+//            could also fail for network/timing reasons and the
+//            ItemDetailPage had no error state handling, any failure left
+//            the page stuck on "Loading item..." indefinitely.
+//            Fix: added explicit rule for the subcollection (all staff read,
+//            Owner+ write — matches the parent inventory permission model).
 //
 // ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
 //   superadmin  → God-mode. Manages users, backups, car repo, system config.
@@ -34,6 +32,7 @@
 //   [✓] Car repository: write restricted to superadmin only
 //   [✓] No sensitive data accessible to unauthenticated requests
 //   [✓] followUpTemplates: Owner+ read/write (was missing — caused loading loop)
+//   [✓] inventory/restockHistory subcollection: explicitly covered (v1.2)
 // ─────────────────────────────────────────────────────────────────────────
 
 rules_version = '2';
@@ -45,12 +44,10 @@ service cloud.firestore {
     // HELPER FUNCTIONS
     // ──────────────────────────────────────────────────────────
 
-    // Is the request from an authenticated user?
     function isAuth() {
       return request.auth != null;
     }
 
-    // Role helpers — role is stored in custom claims
     function role() {
       return request.auth.token.role;
     }
@@ -70,26 +67,20 @@ service cloud.firestore {
       return isSuperAdmin() || isOwner() || isEmployee();
     }
 
-    // FIX 1: Was pointing to systemConfig/config — correct doc ID is 'main'.
-    // This bug meant the lock check always failed (doc not found → error → rule false).
     function invoiceDbLocked() {
       return get(/databases/$(database)/documents/systemConfig/main).data.invoiceDbLocked == true;
     }
 
-    // Is the requesting user operating on their own document?
     function isSelf(userId) {
       return isAuth() && request.auth.uid == userId;
     }
 
-    // Ensure only allowed fields are being updated (prevents field injection)
     function onlyUpdating(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
 
     // ──────────────────────────────────────────────────────────
     // /users — User management
-    // SuperAdmin: full CRUD
-    // Owner/Employee: read own record, update own theme/language/password only
     // ──────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read:   if isSuperAdmin() || isSelf(userId);
@@ -101,14 +92,11 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /customers — Customer records
-    // All staff can read. Owner+ and Employee can create/edit (limited).
-    // Only Owner+ can delete.
     // ──────────────────────────────────────────────────────────
     match /customers/{customerId} {
       allow read:   if isAnyStaff();
-      allow create: if isAnyStaff();     // Employee can create new customers
+      allow create: if isAnyStaff();
       allow update: if isOwnerOrAbove()
-                    // Employee can update only basic fields, NOT financial or reminder fields
                     || (isEmployee() && onlyUpdating([
                          'name', 'phone', 'altPhone', 'vehicleNo',
                          'vehicleCompany', 'vehicleModel', 'vehicleYear',
@@ -121,39 +109,39 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /invoices — Invoice records
-    // CRITICAL: Respects SuperAdmin invoice DB lock.
-    // Employee can create PENDING invoices only.
-    // Only Owner+ can approve/delete.
     // ──────────────────────────────────────────────────────────
     match /invoices/{invoiceId} {
-      // When DB is locked, NO ONE can read (except SuperAdmin for backup purposes)
       allow read: if isSuperAdmin()
                   || (!invoiceDbLocked() && isAnyStaff());
-
-      // Create: Employee can create pending invoices; Owner+ can create any
       allow create: if isOwnerOrAbove()
                     || (isEmployee() && request.resource.data.status == 'PENDING');
-
-      // Update: Employee cannot approve/delete. Only Owner+ can change status to APPROVED.
       allow update: if isOwnerOrAbove() && !invoiceDbLocked();
-
-      // Delete: Owner+ only, and only when DB is not locked
       allow delete: if isOwnerOrAbove() && !invoiceDbLocked();
     }
 
     // ──────────────────────────────────────────────────────────
-    // /inventory — Inventory items
-    // All staff can read. Only Owner+ can add/edit/delete.
+    // /inventory — Inventory items + restockHistory subcollection
+    // FIX v1.2: Added explicit rule for restockHistory subcollection.
+    // Firestore rules do NOT inherit from the parent match block.
+    // Without this, getRestockHistory() was denied in production.
     // ──────────────────────────────────────────────────────────
     match /inventory/{itemId} {
-      allow read:             if isAnyStaff();
-      allow create, update:   if isOwnerOrAbove();
-      allow delete:           if isOwnerOrAbove();
+      allow read:           if isAnyStaff();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
+
+      // Restock history subcollection — all staff can read,
+      // only Owner+ can write (same model as parent inventory doc).
+      match /restockHistory/{historyId} {
+        allow read:   if isAnyStaff();
+        allow create: if isOwnerOrAbove();
+        allow update: if isSuperAdmin();   // effectively immutable; SA only for data correction
+        allow delete: if isSuperAdmin();   // SA can clean up duplicate entries if needed
+      }
     }
 
     // ──────────────────────────────────────────────────────────
     // /quotations — Quotation records
-    // EMPLOYEE AND BELOW HAVE NO ACCESS AT ALL.
     // ──────────────────────────────────────────────────────────
     match /quotations/{quotationId} {
       allow read:             if isOwnerOrAbove();
@@ -163,20 +151,15 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /auditLog — Audit trail
-    // FIX 3: Added delete for SuperAdmin only (new client feature request).
-    // Owner+ can read. Any staff can create (append). No one can update.
-    // SuperAdmin can delete individual entries OR wipe the entire collection.
     // ──────────────────────────────────────────────────────────
     match /auditLog/{logId} {
       allow read:   if isOwnerOrAbove();
-      allow create: if isAnyStaff();    // Any staff can create log entries
-      allow delete: if isSuperAdmin();  // SuperAdmin can delete entries (new feature)
-      // NO update rule — immutable once written (except SuperAdmin delete)
+      allow create: if isAnyStaff();
+      allow delete: if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
     // /followUps — Follow-up schedules
-    // Owner+ only (employee has no messaging access)
     // ──────────────────────────────────────────────────────────
     match /followUps/{followUpId} {
       allow read, write: if isOwnerOrAbove();
@@ -184,10 +167,6 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /followUpTemplates — Follow-up message templates (EN/HI/GU)
-    // FIX 2: This collection was MISSING a rule — fell to DENY ALL.
-    // settingsService.js reads this on every settings page load, causing a
-    // permission error that broke the settings initialization in production.
-    // Owner+ can read and write (same permissions as /messageTemplates).
     // ──────────────────────────────────────────────────────────
     match /followUpTemplates/{templateId} {
       allow read:           if isOwnerOrAbove();
@@ -196,13 +175,11 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /conversations — Unified messaging inbox (WhatsApp/IG/FB)
-    // EMPLOYEE HAS NO ACCESS AT ALL.
+    // /conversations — Unified messaging inbox
     // ──────────────────────────────────────────────────────────
     match /conversations/{conversationId} {
       allow read, write: if isOwnerOrAbove();
 
-      // Private notes within a conversation
       match /notes/{noteId} {
         allow read, write: if isOwnerOrAbove();
       }
@@ -210,61 +187,51 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /carRepository — Car company/model/media link tree
-    // SUPERADMIN WRITE ONLY. All staff can read (for quotation selector).
     // ──────────────────────────────────────────────────────────
     match /carRepository/{docId} {
-      allow read:             if isAnyStaff();
-      allow create, update, delete: if isSuperAdmin();
+      allow read:                    if isAnyStaff();
+      allow create, update, delete:  if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
-    // /docsRepository — Business documents (price lists, banners, etc.)
-    // Owner+ can write. All staff can read (for quick send in messaging).
+    // /docsRepository — Business documents
     // ──────────────────────────────────────────────────────────
     match /docsRepository/{docId} {
-      allow read:             if isAnyStaff();
-      allow create, update:   if isOwnerOrAbove();
-      allow delete:           if isOwnerOrAbove();
+      allow read:           if isAnyStaff();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
     }
 
     // ──────────────────────────────────────────────────────────
-    // /settings — Business settings (GST, low stock thresholds, etc.)
-    // All staff can read (e.g., for GST display on invoices).
-    // Only Owner+ can write.
+    // /settings — Business settings
     // ──────────────────────────────────────────────────────────
     match /settings/{settingId} {
-      allow read:             if isAnyStaff();
-      allow create, update:   if isOwnerOrAbove();
-      allow delete:           if isSuperAdmin();
+      allow read:           if isAnyStaff();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
     // /reminderLog — CNG re-test reminder tracking
-    // Owner+ can read. Cloud Functions write via admin SDK (bypasses rules).
-    // Owner can update re-test date after physical inspection.
     // ──────────────────────────────────────────────────────────
     match /reminderLog/{reminderId} {
       allow read:   if isOwnerOrAbove();
-      allow create: if isOwnerOrAbove(); // Also written by Cloud Functions (admin SDK)
-      allow update: if isOwnerOrAbove(); // Owner manually updates re-test date
+      allow create: if isOwnerOrAbove();
+      allow update: if isOwnerOrAbove();
       allow delete: if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
-    // /systemConfig — SuperAdmin control flags (invoiceDbLocked, etc.)
-    // CRITICAL: SuperAdmin MUST always be able to read/write here.
-    //           This ensures SuperAdmin is never locked out.
-    //           Owner and below: READ ONLY (to check lock status client-side).
+    // /systemConfig — SuperAdmin control flags
     // ──────────────────────────────────────────────────────────
     match /systemConfig/{configId} {
-      allow read:             if isAnyStaff();  // All staff need to check invoiceDbLocked
-      allow create, update:   if isSuperAdmin(); // Only SuperAdmin can lock/unlock DB
-      allow delete:           if isSuperAdmin();
+      allow read:           if isAnyStaff();
+      allow create, update: if isSuperAdmin();
+      allow delete:         if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
-    // /messageTemplates — Follow-up message templates (legacy collection name)
-    // Owner+ can read and write.
+    // /messageTemplates — Follow-up message templates (legacy name)
     // ──────────────────────────────────────────────────────────
     match /messageTemplates/{templateId} {
       allow read:           if isOwnerOrAbove();
@@ -274,7 +241,6 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // DENY ALL OTHER PATHS BY DEFAULT
-    // Any collection not explicitly listed above is fully denied.
     // ──────────────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

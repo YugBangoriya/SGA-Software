@@ -1,3 +1,4 @@
+// SGA — Last updated: Added deleteQuotation function for individual deletion feature
 // src/lib/quotationService.js
 // Phase 5 — Quotation Module
 // All Firestore, Storage, and Cloud Function operations for quotations.
@@ -11,12 +12,12 @@ import {
   getDocs,
   addDoc,
   updateDoc,
+  deleteDoc,
   query,
   orderBy,
   limit,
   runTransaction,
   serverTimestamp,
-  increment,
 } from "firebase/firestore";
 import {
   ref,
@@ -26,6 +27,8 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { db, storage, functions } from "./firebase";
 import { logAudit } from "./auditService";
+
+const QUOTATIONS_COLLECTION = "quotations";
 
 // ─── Quotation Number Generator ───────────────────────────────────────────────
 // Format: QT-YYYY-NNN (e.g., QT-2025-001)
@@ -40,7 +43,6 @@ export async function generateQuotationNumber() {
     const counterSnap = await transaction.get(counterRef);
 
     if (!counterSnap.exists()) {
-      // First ever quotation — initialize counter
       transaction.set(counterRef, { lastNumber: 1, year: currentYear });
       return 1;
     }
@@ -48,12 +50,10 @@ export async function generateQuotationNumber() {
     const data = counterSnap.data();
 
     if (data.year !== currentYear) {
-      // New year — reset counter
       transaction.update(counterRef, { lastNumber: 1, year: currentYear });
       return 1;
     }
 
-    // Increment counter
     const next = (data.lastNumber || 0) + 1;
     transaction.update(counterRef, { lastNumber: next });
     return next;
@@ -96,8 +96,8 @@ export async function createQuotation(quotationData, userId, userDisplayName) {
       Number(quotationData.labourCost || 0)
     ),
     notes: quotationData.notes || "",
-    pdfUrl: null,            // set after PDF upload
-    status: "draft",          // 'draft' | 'sent'
+    pdfUrl: null,
+    status: "draft",
     createdBy: userId,
     createdByName: userDisplayName,
     createdAt: serverTimestamp(),
@@ -106,9 +106,9 @@ export async function createQuotation(quotationData, userId, userDisplayName) {
     whatsappSentTo: null,
   };
 
-  const docRef = await addDoc(collection(db, "quotations"), payload);
+  const docRef = await addDoc(collection(db, QUOTATIONS_COLLECTION), payload);
 
-  await logAudit("quotation_created", docRef.id, "quotations", {
+  await logAudit("quotation_created", docRef.id, QUOTATIONS_COLLECTION, {
     quotationNumber,
     customerName: payload.customerName,
     totalAmount: payload.totalAmount,
@@ -121,7 +121,7 @@ export async function createQuotation(quotationData, userId, userDisplayName) {
 
 export async function fetchQuotations() {
   const q = query(
-    collection(db, "quotations"),
+    collection(db, QUOTATIONS_COLLECTION),
     orderBy("createdAt", "desc"),
     limit(200)
   );
@@ -133,15 +133,36 @@ export async function fetchQuotations() {
 // ─── Fetch Single Quotation ───────────────────────────────────────────────────
 
 export async function fetchQuotationById(quotationId) {
-  const snap = await getDoc(doc(db, "quotations", quotationId));
+  const snap = await getDoc(doc(db, QUOTATIONS_COLLECTION, quotationId));
   if (!snap.exists()) throw new Error("Quotation not found");
   return { id: snap.id, ...snap.data() };
+}
+
+// ─── Delete Quotation ─────────────────────────────────────────────────────────
+
+/**
+ * Permanently delete a single quotation document.
+ * Owner / SuperAdmin only (enforced by Firestore rules).
+ * @param {string} quotationId — Firestore document ID
+ * @param {object} user        — Firebase Auth user object (for audit log)
+ */
+export async function deleteQuotation(quotationId, user) {
+  await deleteDoc(doc(db, QUOTATIONS_COLLECTION, quotationId));
+
+  await logAudit({
+    action:           "quotation.deleted",
+    userId:           user.uid,
+    userName:         user.displayName || user.email,
+    targetId:         quotationId,
+    targetCollection: QUOTATIONS_COLLECTION,
+    metadata:         {},
+  });
 }
 
 // ─── Update Quotation PDF URL ─────────────────────────────────────────────────
 
 export async function updateQuotationPdfUrl(quotationId, pdfUrl) {
-  await updateDoc(doc(db, "quotations", quotationId), {
+  await updateDoc(doc(db, QUOTATIONS_COLLECTION, quotationId), {
     pdfUrl,
     updatedAt: serverTimestamp(),
   });
@@ -150,7 +171,7 @@ export async function updateQuotationPdfUrl(quotationId, pdfUrl) {
 // ─── Update Quotation WhatsApp Status ─────────────────────────────────────────
 
 export async function markQuotationWhatsAppSent(quotationId, phone) {
-  await updateDoc(doc(db, "quotations", quotationId), {
+  await updateDoc(doc(db, QUOTATIONS_COLLECTION, quotationId), {
     status: "sent",
     whatsappSentAt: serverTimestamp(),
     whatsappSentTo: phone,
@@ -175,7 +196,9 @@ export async function uploadQuotationPdf(pdfBlob, quotationNumber) {
 
 // ─── Send Quotation via WhatsApp (Cloud Function) ─────────────────────────────
 
-export async function sendQuotationWhatsApp(quotationId, pdfUrl, customerPhone, customerName, quotationNumber, userId) {
+export async function sendQuotationWhatsApp(
+  quotationId, pdfUrl, customerPhone, customerName, quotationNumber, userId
+) {
   const sendFn = httpsCallable(functions, "sendQuotationWhatsApp");
 
   const result = await sendFn({
@@ -189,7 +212,7 @@ export async function sendQuotationWhatsApp(quotationId, pdfUrl, customerPhone, 
   if (result.data.success) {
     await markQuotationWhatsAppSent(quotationId, customerPhone);
 
-    await logAudit("quotation_whatsapp_sent", quotationId, "quotations", {
+    await logAudit("quotation_whatsapp_sent", quotationId, QUOTATIONS_COLLECTION, {
       quotationNumber,
       customerPhone,
       customerName,
@@ -200,16 +223,9 @@ export async function sendQuotationWhatsApp(quotationId, pdfUrl, customerPhone, 
 }
 
 // ─── Notify SuperAdmin: Car Not In Repository ─────────────────────────────────
-// When owner selects "Not in list" and types a manual vehicle, this creates
-// a notification document that SuperAdmin can view in their notifications panel.
 
 export async function notifyCarNotInRepository({
-  vehicleCompany,
-  vehicleModel,
-  quotationId,
-  quotationNumber,
-  createdBy,
-  createdByName,
+  vehicleCompany, vehicleModel, quotationId, quotationNumber, createdBy, createdByName,
 }) {
   await addDoc(collection(db, "notifications"), {
     type: "car_not_in_repository",
@@ -228,7 +244,6 @@ export async function notifyCarNotInRepository({
 }
 
 // ─── Fetch Car Repository Data ─────────────────────────────────────────────────
-// Fetches all car companies and models from Car Repository (Phase 6)
 
 export async function fetchCarRepository() {
   const snap = await getDocs(collection(db, "carRepository"));
@@ -236,7 +251,6 @@ export async function fetchCarRepository() {
 }
 
 // ─── Fetch Business Settings ───────────────────────────────────────────────────
-// Gets business info for PDF header and social links
 
 export async function fetchBusinessSettings() {
   const snap = await getDoc(doc(db, "settings", "business"));

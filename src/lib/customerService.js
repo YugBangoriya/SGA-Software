@@ -1,3 +1,4 @@
+// SGA — Last updated: Added deleteCustomer function for individual record deletion feature
 /**
  * customerService.js
  * All Firestore operations for the Customer Records module.
@@ -24,6 +25,7 @@ import {
   doc,
   addDoc,
   updateDoc,
+  deleteDoc,
   getDoc,
   getDocs,
   query,
@@ -40,24 +42,15 @@ const CUSTOMERS_COL = 'customers';
 /**
  * Fetch all customers, sorted newest-first by createdAt (client-side).
  * Returns array of { id, ...data } objects.
- *
- * Using getDocs on the bare collection (no orderBy) ensures Firestore returns
- * every document, including any whose createdAt field is missing or null.
- * The JS sort below handles missing values gracefully by placing those docs
- * at the end of the list.
  */
 export const fetchAllCustomers = async () => {
   const snap = await getDocs(collection(db, CUSTOMERS_COL));
-
   const customers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-  // Sort newest-first. Documents without createdAt are pushed to the end.
   customers.sort((a, b) => {
     const ta = a.createdAt?.toMillis?.() ?? a.createdAt ?? 0;
     const tb = b.createdAt?.toMillis?.() ?? b.createdAt ?? 0;
     return tb - ta;
   });
-
   return customers;
 };
 
@@ -98,8 +91,19 @@ export const updateCustomer = async (id, data) => {
 };
 
 /**
+ * Permanently delete a customer record.
+ * Only callable by Owner or SuperAdmin (enforced at Firestore rules level).
+ * Returns the deleted customer's ID for optimistic local removal.
+ *
+ * @param {string} customerId — Firestore document ID to delete
+ */
+export const deleteCustomer = async (customerId) => {
+  await deleteDoc(doc(db, CUSTOMERS_COL, customerId));
+  return customerId;
+};
+
+/**
  * Append a re-test date entry to a customer's retestDates array.
- * Each entry: { retestDate: 'YYYY-MM-DD', recordedAt: ISO string, recordedBy: uid, notes: string }
  */
 export const addRetestDate = async (customerId, entry) => {
   await updateDoc(doc(db, CUSTOMERS_COL, customerId), {
@@ -123,18 +127,11 @@ export const updateRetestDates = async (customerId, retestDates) => {
 
 // ─── SETTINGS — DROPDOWN OPTIONS ─────────────────────────────────────────────
 
-/**
- * Fetch the settings/main document which holds Owner-managed dropdown values.
- * Returns the document data or null.
- */
 export const fetchSettings = async () => {
   const snap = await getDoc(doc(db, 'settings', 'main'));
   return snap.exists() ? snap.data() : null;
 };
 
-/**
- * Update the settings/main document (partial update).
- */
 export const updateSettings = async (data) => {
   const ref  = doc(db, 'settings', 'main');
   const snap = await getDoc(ref);
@@ -148,20 +145,12 @@ export const updateSettings = async (data) => {
 
 // ─── SETTINGS — CUSTOM FIELDS ─────────────────────────────────────────────────
 
-/**
- * Fetch SuperAdmin-defined custom fields schema.
- * Returns array of field definitions:
- * [{ id, label, type: 'text'|'number'|'date'|'select', options?: string[] }]
- */
 export const fetchCustomFields = async () => {
   const snap = await getDoc(doc(db, 'settings', 'customFields'));
   if (!snap.exists()) return [];
   return snap.data().fields || [];
 };
 
-/**
- * Save the entire custom fields schema (SuperAdmin only).
- */
 export const saveCustomFields = async (fields) => {
   const { setDoc } = await import('firebase/firestore');
   await setDoc(doc(db, 'settings', 'customFields'), {
@@ -171,8 +160,6 @@ export const saveCustomFields = async (fields) => {
 };
 
 // ─── DEFAULT DROPDOWN VALUES ──────────────────────────────────────────────────
-// Used when settings/main doesn't exist yet (fresh install).
-// Owner can edit these from Settings after first login.
 
 export const DEFAULT_DROPDOWN_OPTIONS = {
   cngKitBrands:     ['Lovato', 'Tomasetto', 'BRC', 'LANDI RENZO', 'Romano', 'other'],

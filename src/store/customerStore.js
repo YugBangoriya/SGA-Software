@@ -1,56 +1,7 @@
+// SGA — Last updated: Added deleteCustomer action for individual record deletion feature
 /**
  * customerStore.js
  * Zustand store for the Customer Records module.
- * Holds the customer list, active customer, search/filter state, and settings data.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * BUG 3 FIX — Blank Customer page (infinite re-render loop):
- *
- *   ROOT CAUSE:
- *     The previous implementation of clearCustomers() incremented listVersion
- *     at the same time as clearing the list. CustomerList's useEffect had
- *     [listVersion] as its dependency and returned clearCustomers() as its
- *     cleanup function. This created a self-triggering loop:
- *
- *       Mount → useEffect runs → cleanup registered
- *       Unmount/re-render → cleanup fires clearCustomers()
- *                         → listVersion bumps
- *                         → useEffect re-runs (dependency changed)
- *                         → cleanup registered again
- *                         → ... infinite loop
- *
- *     React fires cleanup before re-running an effect when a dependency
- *     changes, so any mutation (patchLocalCustomer, addLocalCustomer) that
- *     also bumped listVersion caused the cleanup to fire mid-render, which
- *     cleared the list, which caused another bump, which started the loop.
- *     The component rendered an empty PageShell (gray background, no content)
- *     because customers was [] throughout and isLoadingList toggled too fast
- *     for the skeleton to show — producing the "blank page" symptom.
- *
- *   FIX — Two targeted changes:
- *
- *   1. clearCustomers() → only clears data, does NOT touch listVersion.
- *      Its sole job is to wipe the stale list so the next mount starts fresh.
- *      It does NOT need to signal re-fetch because the mount itself always
- *      calls loadCustomers() unconditionally (see CustomerList fix).
- *
- *   2. New action: bumpListVersion() → increments listVersion only.
- *      Called by patchLocalCustomer() and addLocalCustomer() to signal that
- *      remote data has changed. CustomerList is NOT currently subscribed to
- *      listVersion as a re-fetch trigger (see CustomerList fix), so this is
- *      kept for future use and for any component that opts into reactive
- *      re-fetch behaviour.
- *
- *   HOW CustomerList.jsx now works (see that file for full detail):
- *     useEffect(() => {
- *       loadCustomers();
- *       loadSettings();
- *       return () => clearCustomers();   // clears list on unmount (no version bump)
- *     }, []);                            // runs ONCE on mount — no infinite loop
- *
- *   The list is therefore always fresh on first mount and cleared on unmount,
- *   without any circular dependency between cleanup and effect.
- * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { create } from 'zustand';
@@ -59,6 +10,7 @@ import {
   fetchCustomerById,
   fetchSettings,
   fetchCustomFields,
+  deleteCustomer,
   DEFAULT_DROPDOWN_OPTIONS,
 } from '../lib/customerService';
 
@@ -67,11 +19,7 @@ const useCustomerStore = create((set, get) => ({
   customers:     [],
   isLoadingList: false,
   listError:     null,
-
-  // listVersion is kept in the store for future use (e.g. multi-tab sync,
-  // explicit refetch buttons). It is no longer used as a useEffect dependency
-  // in CustomerList because doing so caused the infinite re-render loop.
-  listVersion: 0,
+  listVersion:   0,
 
   // ── Selected / active customer ─────────────────────────────────────────────
   activeCustomer:    null,
@@ -80,20 +28,16 @@ const useCustomerStore = create((set, get) => ({
 
   // ── Search & filter ────────────────────────────────────────────────────────
   searchQuery:      '',
-  filterEmission:   '',   // e.g. 'BS6'
-  filterTechnician: '',   // technician name
+  filterEmission:   '',
+  filterTechnician: '',
 
   // ── Settings & dropdowns ───────────────────────────────────────────────────
   dropdownOptions:   DEFAULT_DROPDOWN_OPTIONS,
-  customFields:      [],  // SuperAdmin-defined extra columns
+  customFields:      [],
   isLoadingSettings: false,
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  /**
-   * Load all customers from Firestore.
-   * Called by CustomerList on mount (and on explicit refresh).
-   */
   loadCustomers: async () => {
     set({ isLoadingList: true, listError: null });
     try {
@@ -104,38 +48,14 @@ const useCustomerStore = create((set, get) => ({
     }
   },
 
-  /**
-   * BUG 3 FIX: Clear the customer list WITHOUT bumping listVersion.
-   *
-   * Called in CustomerList's useEffect cleanup (on unmount). This wipes
-   * the stale list from memory so the next mount starts with an empty
-   * state and shows the skeleton loader rather than stale data.
-   *
-   * IMPORTANT: Must NOT increment listVersion here. If it did, the bump
-   * would be detected by any component subscribed to [listVersion] in a
-   * useEffect dependency array, causing that effect's cleanup to run,
-   * which calls clearCustomers() again — creating an infinite loop.
-   */
   clearCustomers: () => {
-    set({
-      customers:  [],
-      listError:  null,
-      // listVersion intentionally NOT incremented here
-    });
+    set({ customers: [], listError: null });
   },
 
-  /**
-   * Increment listVersion to signal that remote data has changed.
-   * Separated from clearCustomers() to prevent the loop described above.
-   * Can be used by any component that wants to explicitly trigger a
-   * re-fetch in a future implementation (e.g. a "Refresh" button that
-   * remounts CustomerList via key prop).
-   */
   bumpListVersion: () => {
     set((state) => ({ listVersion: state.listVersion + 1 }));
   },
 
-  /** Load a single customer into activeCustomer */
   loadCustomer: async (id) => {
     set({ isLoadingCustomer: true, customerError: null, activeCustomer: null });
     try {
@@ -146,7 +66,6 @@ const useCustomerStore = create((set, get) => ({
     }
   },
 
-  /** Refresh active customer (e.g. after a re-test date is added) */
   refreshActiveCustomer: async () => {
     const { activeCustomer } = get();
     if (!activeCustomer?.id) return;
@@ -156,7 +75,6 @@ const useCustomerStore = create((set, get) => ({
     } catch (_) {}
   },
 
-  /** Load dropdown options and custom fields from Firestore settings */
   loadSettings: async () => {
     set({ isLoadingSettings: true });
     try {
@@ -185,10 +103,20 @@ const useCustomerStore = create((set, get) => ({
   },
 
   /**
-   * Update a customer in the local list without re-fetching everything.
-   * Applies the patch optimistically to both the list and the active customer.
-   * Also calls bumpListVersion() so any future subscriber can react to the change.
+   * Delete one or more customers by ID.
+   * Removes them optimistically from the local list immediately.
+   * @param {string[]} ids — array of Firestore document IDs to delete
    */
+  deleteCustomers: async (ids) => {
+    // Optimistic removal from local list
+    set((state) => ({
+      customers: state.customers.filter((c) => !ids.includes(c.id)),
+    }));
+    get().bumpListVersion();
+    // Fire all deletes in parallel
+    await Promise.all(ids.map((id) => deleteCustomer(id)));
+  },
+
   patchLocalCustomer: (id, data) => {
     set((state) => ({
       customers: state.customers.map((c) =>
@@ -199,15 +127,9 @@ const useCustomerStore = create((set, get) => ({
           ? { ...state.activeCustomer, ...data }
           : state.activeCustomer,
     }));
-    // Bump version separately — not inside the set() call above so it
-    // cannot interact with the list-clearing logic in clearCustomers().
     get().bumpListVersion();
   },
 
-  /**
-   * Prepend a newly created customer to the local list.
-   * Also bumps listVersion for consistency.
-   */
   addLocalCustomer: (customer) => {
     set((state) => ({
       customers: [customer, ...state.customers],
@@ -215,16 +137,11 @@ const useCustomerStore = create((set, get) => ({
     get().bumpListVersion();
   },
 
-  /** Search & filter setters */
   setSearchQuery:      (q) => set({ searchQuery: q }),
   setFilterEmission:   (v) => set({ filterEmission: v }),
   setFilterTechnician: (v) => set({ filterTechnician: v }),
   clearFilters:        ()  => set({ searchQuery: '', filterEmission: '', filterTechnician: '' }),
 
-  /**
-   * Computed: filtered customer list.
-   * Reads from the live `customers` array in the store.
-   */
   getFilteredCustomers: () => {
     const { customers, searchQuery, filterEmission, filterTechnician } = get();
     const q = searchQuery.toLowerCase();

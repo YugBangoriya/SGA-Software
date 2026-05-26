@@ -1,27 +1,37 @@
+// SGA — Last updated: Fixed stuck-loading bug (itemLoading/itemError) + added Delete Item button for Owner+
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
  *
- * Shows:
- *  - Current stock level + status badge
- *  - All item metadata (category, threshold, vendor, purchase price)
- *  - Full restock history table (date, qty added, price/unit, vendor, type)
- *  - Owner: Replenish button + Edit Threshold inline
- *  - Employee: read-only view
+ * BUG FIX:
+ *   Previously the component checked `if (loading || !selectedItem)` to decide
+ *   whether to show the loading spinner. `loading` was a shared flag used by
+ *   BOTH the list page (fetchItems) AND the detail page (fetchItem). If
+ *   fetchItem threw a Firestore permission error (which happened in production
+ *   because the restockHistory subcollection had no security rule — fixed in
+ *   firestore.rules v1.2), loading became false but selectedItem stayed null.
+ *   `false || true = true` → spinner showed forever with no error message.
+ *
+ *   Fix:
+ *   1. inventoryStore now uses a SEPARATE `itemLoading` / `itemError` pair for
+ *      fetchItem (the detail-level fetch), independent from the list's `loading`.
+ *   2. ItemDetailPage checks `itemLoading` instead of `loading`.
+ *   3. If `itemError` is set (fetch failed), an error card is shown instead of
+ *      the spinner — so the user can go back rather than being stuck.
+ *
+ * NEW FEATURE:
+ *   Owner/SuperAdmin can now delete the inventory item from this page.
+ *   A small "Delete Item" button appears in the header (Owner+ only).
+ *   Deleting requires typing "DELETE" to confirm (same pattern as invoices).
  *
  * Route: /inventory/:itemId
- *
- * FIX (Phase 3 Bug): useAuthStore exposes `firebaseUser` (not `user`) and
- * `role` (not `userRole`). Aliased destructure fixes both so isOwnerOrAdmin
- * evaluates correctly and `user` passed to ReplenishModal / ThresholdEditor
- * is the real Firebase user object (not undefined).
  */
 
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, RefreshCw, Package, Calendar, Tag,
-  TruckIcon, AlertTriangle, Edit2, Check, X, History, Info,
+  TruckIcon, AlertTriangle, Edit2, Check, X, History, Info, Trash2,
 } from 'lucide-react';
 
 import useInventoryStore from '../../store/inventoryStore';
@@ -32,42 +42,123 @@ import { QuantityDisplay, StockStatusBadge } from './index';
 import { formatCurrency, formatDate } from '../../lib/invoiceHelpers';
 import ReplenishModal from './ReplenishModal';
 
-// ─── Restock History Entry Type Badge ────────────────────────────────────
+// ─── Delete Confirmation Modal ─────────────────────────────────────────────────
+
+function DeleteItemModal({ itemName, onConfirm, onCancel, isDeleting }) {
+  const [typed, setTyped] = useState('');
+  const confirmed = typed.trim() === 'DELETE';
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }}
+      onClick={onCancel}
+    >
+      <div style={{
+        background: '#FFFFFF', borderRadius: 16,
+        padding: '28px 24px', maxWidth: 360, width: '100%',
+        boxShadow: '0 12px 48px rgba(0,0,0,0.3)',
+      }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%',
+            background: '#FFEBEE',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Trash2 size={22} color="#CC0000" />
+          </div>
+        </div>
+        <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: '#222', textAlign: 'center', fontFamily: TYPOGRAPHY.sans }}>
+          Delete "{itemName}"?
+        </h3>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 1.5, fontFamily: TYPOGRAPHY.sans }}>
+          This will permanently remove the item from inventory. This action cannot be undone.
+        </p>
+        <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 600, color: '#444', fontFamily: TYPOGRAPHY.sans }}>
+          Type <strong style={{ color: '#CC0000' }}>DELETE</strong> to confirm:
+        </p>
+        <input
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="Type DELETE here"
+          autoFocus
+          style={{
+            width: '100%', padding: '10px 12px',
+            border: `1.5px solid ${confirmed ? '#CC0000' : '#E8E2DF'}`,
+            borderRadius: 8, fontSize: 14,
+            fontFamily: TYPOGRAPHY.mono, outline: 'none',
+            marginBottom: 16, letterSpacing: 1,
+            boxSizing: 'border-box',
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && confirmed) onConfirm(); }}
+        />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            disabled={isDeleting}
+            style={{
+              flex: 1, padding: '11px 0', background: 'none',
+              border: '1.5px solid #E8E2DF', borderRadius: 8,
+              color: '#444', fontSize: 14, fontWeight: 600,
+              cursor: 'pointer', fontFamily: TYPOGRAPHY.sans,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!confirmed || isDeleting}
+            style={{
+              flex: 1, padding: '11px 0',
+              background: confirmed && !isDeleting ? '#CC0000' : '#E0C4C4',
+              border: 'none', borderRadius: 8,
+              color: '#FFFFFF', fontSize: 14, fontWeight: 700,
+              cursor: confirmed && !isDeleting ? 'pointer' : 'not-allowed',
+              fontFamily: TYPOGRAPHY.sans, transition: 'background 0.2s',
+            }}
+          >
+            {isDeleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Restock History Entry Type Badge ─────────────────────────────────────────
 
 function EntryTypeBadge({ type }) {
   const isInitial = type === 'INITIAL';
   return (
     <span style={{
-      fontSize:      10,
-      fontWeight:    700,
-      padding:       '2px 8px',
-      borderRadius:  RADII.full,
-      letterSpacing: 0.5,
-      fontFamily:    TYPOGRAPHY.sans,
-      background:    isInitial ? COLORS.statusBlueBg  : COLORS.statusGreenBg,
-      color:         isInitial ? COLORS.statusBlue    : COLORS.statusGreen,
+      fontSize: 10, fontWeight: 700, padding: '2px 8px',
+      borderRadius: RADII.full, letterSpacing: 0.5, fontFamily: TYPOGRAPHY.sans,
+      background: isInitial ? COLORS.statusBlueBg  : COLORS.statusGreenBg,
+      color:      isInitial ? COLORS.statusBlue    : COLORS.statusGreen,
     }}>
       {isInitial ? 'INITIAL' : 'REPLENISH'}
     </span>
   );
 }
 
-// ─── Inline Threshold Editor ───────────────────────────────────────────────
+// ─── Inline Threshold Editor ───────────────────────────────────────────────────
 
 function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
   const { setLowStockThreshold } = useInventoryStore();
-  const [editing, setEditing]    = useState(false);
-  const [value,   setValue]      = useState(String(currentThreshold));
-  const [loading, setLoading]    = useState(false);
-  const [error,   setError]      = useState('');
+  const [editing, setEditing] = useState(false);
+  const [value,   setValue]   = useState(String(currentThreshold));
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
 
   const handleSave = async () => {
-    if (isNaN(value) || Number(value) < 0) {
-      setError('Must be 0 or more');
-      return;
-    }
-    setLoading(true);
-    setError('');
+    if (isNaN(value) || Number(value) < 0) { setError('Must be 0 or more'); return; }
+    setLoading(true); setError('');
     try {
       await setLowStockThreshold(itemId, Number(value), user);
       setEditing(false);
@@ -88,15 +179,9 @@ function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
         <button
           onClick={() => { setValue(String(currentThreshold)); setEditing(true); }}
           style={{
-            background:   'none',
-            border:       `1px solid ${COLORS.tableHeader}`,
-            borderRadius: RADII.sm,
-            padding:      '3px 7px',
-            cursor:       'pointer',
-            display:      'flex',
-            alignItems:   'center',
-            gap:          4,
-            color:        COLORS.textSecondary,
+            background: 'none', border: `1px solid ${COLORS.tableHeader}`,
+            borderRadius: RADII.sm, padding: '3px 7px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 4, color: COLORS.textSecondary,
           }}
         >
           <Edit2 size={11} />
@@ -109,19 +194,13 @@ function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <input
-        type="number"
-        min="0"
-        value={value}
+        type="number" min="0" value={value}
         onChange={(e) => { setValue(e.target.value); setError(''); }}
         autoFocus
         style={{
-          width:        70,
-          padding:      '5px 8px',
-          border:       `1.5px solid ${error ? COLORS.statusRed : COLORS.primary}`,
-          borderRadius: RADII.sm,
-          fontSize:     13,
-          fontFamily:   TYPOGRAPHY.mono,
-          outline:      'none',
+          width: 70, padding: '5px 8px',
+          border: `1.5px solid ${error ? COLORS.statusRed : COLORS.primary}`,
+          borderRadius: RADII.sm, fontSize: 13, fontFamily: TYPOGRAPHY.mono, outline: 'none',
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter')  handleSave();
@@ -129,17 +208,12 @@ function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
         }}
       />
       <button
-        onClick={handleSave}
-        disabled={loading}
+        onClick={handleSave} disabled={loading}
         style={{
-          background:   COLORS.statusGreen,
-          color:        '#FFF',
-          border:       'none',
-          borderRadius: RADII.sm,
-          padding:      '5px 8px',
-          cursor:       loading ? 'not-allowed' : 'pointer',
-          display:      'flex',
-          alignItems:   'center',
+          background: COLORS.statusGreen, color: '#FFF', border: 'none',
+          borderRadius: RADII.sm, padding: '5px 8px',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center',
         }}
       >
         {loading
@@ -150,60 +224,39 @@ function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
       <button
         onClick={() => { setEditing(false); setError(''); }}
         style={{
-          background:   'none',
-          border:       `1px solid ${COLORS.tableHeader}`,
-          borderRadius: RADII.sm,
-          padding:      '5px 8px',
-          cursor:       'pointer',
-          display:      'flex',
-          alignItems:   'center',
-          color:        COLORS.textSecondary,
+          background: 'none', border: `1px solid ${COLORS.tableHeader}`,
+          borderRadius: RADII.sm, padding: '5px 8px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', color: COLORS.textSecondary,
         }}
       >
         <X size={13} />
       </button>
-      {error && (
-        <span style={{ fontSize: 11, color: COLORS.statusRed, fontFamily: TYPOGRAPHY.sans }}>
-          {error}
-        </span>
-      )}
+      {error && <span style={{ fontSize: 11, color: COLORS.statusRed, fontFamily: TYPOGRAPHY.sans }}>{error}</span>}
     </div>
   );
 }
 
-// ─── Detail Row ─────────────────────────────────────────────────────────────
+// ─── Detail Row ───────────────────────────────────────────────────────────────
 
 function DetailRow({ label, icon, children }) {
   return (
     <div style={{
-      display:      'flex',
-      gap:          12,
-      padding:      '11px 0',
-      borderBottom: `1px solid ${COLORS.divider}`,
-      alignItems:   'flex-start',
+      display: 'flex', gap: 12, padding: '11px 0',
+      borderBottom: `1px solid ${COLORS.divider}`, alignItems: 'flex-start',
     }}>
       <div style={{
-        width:          32,
-        height:         32,
-        borderRadius:   RADII.md,
-        background:     COLORS.primaryLight,
-        display:        'flex',
-        alignItems:     'center',
-        justifyContent: 'center',
-        flexShrink:     0,
-        marginTop:      1,
+        width: 32, height: 32, borderRadius: RADII.md,
+        background: COLORS.primaryLight,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, marginTop: 1,
       }}>
         <span style={{ color: COLORS.primary }}>{icon}</span>
       </div>
       <div style={{ flex: 1 }}>
         <p style={{
-          margin:        0,
-          fontSize:      11,
-          color:         COLORS.textMuted,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-          fontFamily:    TYPOGRAPHY.sans,
-          marginBottom:  4,
+          margin: 0, fontSize: 11, color: COLORS.textMuted,
+          textTransform: 'uppercase', letterSpacing: 0.5,
+          fontFamily: TYPOGRAPHY.sans, marginBottom: 4,
         }}>
           {label}
         </p>
@@ -213,16 +266,16 @@ function DetailRow({ label, icon, children }) {
   );
 }
 
-// ─── Desktop History Row ───────────────────────────────────────────────────
+// ─── Desktop History Row ──────────────────────────────────────────────────────
 
 function DesktopHistoryRow({ entry, isLast }) {
   return (
     <div style={{
-      display:             'grid',
+      display: 'grid',
       gridTemplateColumns: '1.4fr 90px 130px 1.2fr 120px 100px',
-      padding:             '12px 20px',
-      borderBottom:        isLast ? 'none' : `1px solid ${COLORS.divider}`,
-      alignItems:          'center',
+      padding: '12px 20px',
+      borderBottom: isLast ? 'none' : `1px solid ${COLORS.divider}`,
+      alignItems: 'center',
     }}>
       <div>
         <span style={{ fontSize: 13, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.sans }}>
@@ -230,13 +283,9 @@ function DesktopHistoryRow({ entry, isLast }) {
         </span>
         {entry.isDateManuallySet && (
           <span style={{
-            marginLeft:   5,
-            fontSize:     10,
-            background:   COLORS.statusAmberBg,
-            color:        COLORS.statusAmber,
-            padding:      '1px 5px',
-            borderRadius: 3,
-            fontWeight:   700,
+            marginLeft: 5, fontSize: 10,
+            background: COLORS.statusAmberBg, color: COLORS.statusAmber,
+            padding: '1px 5px', borderRadius: 3, fontWeight: 700,
           }}>
             M
           </span>
@@ -259,7 +308,7 @@ function DesktopHistoryRow({ entry, isLast }) {
   );
 }
 
-// ─── Mobile History Row ────────────────────────────────────────────────────
+// ─── Mobile History Row ───────────────────────────────────────────────────────
 
 function MobileHistoryRow({ entry }) {
   return (
@@ -303,29 +352,32 @@ function MobileHistoryRow({ entry }) {
   );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────
+// ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function ItemDetailPage() {
   const { itemId } = useParams();
   const navigate   = useNavigate();
   const isMobile   = useIsMobile();
 
-  // ── FIX: authStore exposes `firebaseUser` (not `user`) and `role` (not `userRole`).
-  // Aliased destructure so all downstream code using `user` and `userRole` works correctly.
+  // FIX: authStore exposes `firebaseUser` (not `user`) and `role` (not `userRole`).
   const { firebaseUser: user, role: userRole } = useAuthStore();
 
   const {
     selectedItem,
     restockHistory,
     historyLoading,
-    loading,
+    itemLoading,   // FIX: use itemLoading (not shared `loading`) for detail fetch
+    itemError,     // FIX: new field — shows error instead of infinite spinner
     fetchItem,
     fetchRestockHistory,
     fetchCategories,
     getCategoryName,
+    deleteItems,
   } = useInventoryStore();
 
-  const [showReplenish, setShowReplenish] = useState(false);
+  const [showReplenish,  setShowReplenish]  = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting,     setIsDeleting]     = useState(false);
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'superadmin';
 
@@ -333,22 +385,21 @@ export default function ItemDetailPage() {
     fetchItem(itemId);
     fetchRestockHistory(itemId);
     fetchCategories();
-  }, [itemId]);
+  }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Loading / not found ──
-
-  if (loading || !selectedItem) {
+  // ── FIX: Loading state ──
+  // Only show spinner while itemLoading is true AND no error yet.
+  if (itemLoading) {
     return (
       <div style={{ minHeight: '100vh', background: COLORS.appBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{
-            width:          36,
-            height:         36,
-            border:         `3px solid ${COLORS.tableHeader}`,
+            width: 36, height: 36,
+            border: `3px solid ${COLORS.tableHeader}`,
             borderTopColor: COLORS.primary,
-            borderRadius:   '50%',
-            animation:      'sgaSpin 0.7s linear infinite',
-            margin:         '0 auto 12px',
+            borderRadius: '50%',
+            animation: 'sgaSpin 0.7s linear infinite',
+            margin: '0 auto 12px',
           }} />
           <p style={{ color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>Loading item...</p>
         </div>
@@ -357,7 +408,54 @@ export default function ItemDetailPage() {
     );
   }
 
+  // ── FIX: Error state (instead of endless spinner) ──
+  if (itemError || !selectedItem) {
+    return (
+      <div style={{ minHeight: '100vh', background: COLORS.appBg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{
+          background: COLORS.cardBg, borderRadius: RADII.xl,
+          padding: '32px 24px', maxWidth: 380, width: '100%',
+          textAlign: 'center', boxShadow: SHADOWS.card,
+          border: `1.5px solid ${COLORS.divider}`,
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.sans }}>
+            Could not load item
+          </h2>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans, lineHeight: 1.5 }}>
+            {itemError || 'Item not found. It may have been deleted.'}
+          </p>
+          <button
+            onClick={() => navigate('/inventory')}
+            style={{
+              background: COLORS.primary, color: '#FFF', border: 'none',
+              borderRadius: RADII.md, padding: '10px 24px',
+              fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              fontFamily: TYPOGRAPHY.sans,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <ArrowLeft size={14} /> Back to Inventory
+          </button>
+        </div>
+        <style>{`@keyframes sgaSpin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
   const item = selectedItem;
+
+  const handleDeleteConfirmed = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteItems([item.id], user);
+      navigate('/inventory');
+    } catch (err) {
+      console.error('[ItemDetailPage] delete failed:', err);
+      setIsDeleting(false);
+      setShowDeleteModal(false);
+    }
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: COLORS.appBg, paddingBottom: 80 }}>
@@ -367,23 +465,16 @@ export default function ItemDetailPage() {
         background: COLORS.primary,
         padding:    isMobile ? '16px 16px 14px' : '20px 28px 16px',
         boxShadow:  SHADOWS.header,
-        position:   'sticky',
-        top:        0,
-        zIndex:     50,
+        position:   'sticky', top: 0, zIndex: 50,
       }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           {/* Back button */}
           <button
             onClick={() => navigate('/inventory')}
             style={{
-              background:   'rgba(255,255,255,0.15)',
-              border:       '1.5px solid rgba(255,255,255,0.3)',
-              borderRadius: RADII.md,
-              padding:      '8px 10px',
-              cursor:       'pointer',
-              color:        '#FFF',
-              display:      'flex',
-              alignItems:   'center',
+              background: 'rgba(255,255,255,0.15)', border: '1.5px solid rgba(255,255,255,0.3)',
+              borderRadius: RADII.md, padding: '8px 10px', cursor: 'pointer',
+              color: '#FFF', display: 'flex', alignItems: 'center',
             }}
           >
             <ArrowLeft size={18} />
@@ -399,28 +490,41 @@ export default function ItemDetailPage() {
             </p>
           </div>
 
-          {/* Replenish button — owner/superadmin only */}
+          {/* Action buttons — owner/superadmin only */}
           {isOwnerOrAdmin && (
-            <button
-              onClick={() => setShowReplenish(true)}
-              style={{
-                background:   '#FFFFFF',
-                color:        COLORS.primary,
-                border:       'none',
-                borderRadius: RADII.md,
-                padding:      '9px 18px',
-                fontWeight:   700,
-                fontSize:     13,
-                cursor:       'pointer',
-                display:      'flex',
-                alignItems:   'center',
-                gap:          6,
-                fontFamily:   TYPOGRAPHY.sans,
-              }}
-            >
-              <RefreshCw size={14} />
-              {!isMobile && 'Replenish'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {/* Delete button */}
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                title="Delete this item"
+                style={{
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1.5px solid rgba(255,255,255,0.25)',
+                  borderRadius: RADII.md,
+                  padding: '9px 10px',
+                  cursor: 'pointer',
+                  color: '#FFC8C8',
+                  display: 'flex', alignItems: 'center',
+                }}
+              >
+                <Trash2 size={15} />
+              </button>
+
+              {/* Replenish button */}
+              <button
+                onClick={() => setShowReplenish(true)}
+                style={{
+                  background: '#FFFFFF', color: COLORS.primary, border: 'none',
+                  borderRadius: RADII.md, padding: '9px 18px',
+                  fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontFamily: TYPOGRAPHY.sans,
+                }}
+              >
+                <RefreshCw size={14} />
+                {!isMobile && 'Replenish'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -428,21 +532,16 @@ export default function ItemDetailPage() {
       {/* ── Main Content ── */}
       <div style={{ maxWidth: 900, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 24px' }}>
 
-        {/* Two-column grid on desktop */}
         <div style={{
-          display:             isMobile ? 'block' : 'grid',
+          display: isMobile ? 'block' : 'grid',
           gridTemplateColumns: '1fr 1fr',
-          gap:                 20,
-          marginBottom:        20,
+          gap: 20, marginBottom: 20,
         }}>
 
           {/* ── Left card — Current Stock ── */}
           <div style={{
-            background:   COLORS.cardBg,
-            borderRadius: RADII.xl,
-            padding:      '20px',
-            boxShadow:    SHADOWS.card,
-            border:       `1.5px solid ${COLORS.divider}`,
+            background: COLORS.cardBg, borderRadius: RADII.xl, padding: '20px',
+            boxShadow: SHADOWS.card, border: `1.5px solid ${COLORS.divider}`,
             marginBottom: isMobile ? 16 : 0,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -473,21 +572,15 @@ export default function ItemDetailPage() {
             {/* Stock level bar */}
             <div style={{ marginTop: 4 }}>
               <div style={{
-                height:       8,
-                background:   COLORS.tableHeader,
-                borderRadius: RADII.full,
-                overflow:     'hidden',
-                marginBottom: 6,
+                height: 8, background: COLORS.tableHeader,
+                borderRadius: RADII.full, overflow: 'hidden', marginBottom: 6,
               }}>
                 <div style={{
-                  height:       '100%',
-                  borderRadius: RADII.full,
+                  height: '100%', borderRadius: RADII.full,
                   background:
-                    item.quantity <= 0
-                      ? COLORS.statusRed
-                      : item.quantity <= (item.lowStockThreshold ?? 5)
-                      ? COLORS.statusAmber
-                      : COLORS.statusGreen,
+                    item.quantity <= 0 ? COLORS.statusRed
+                    : item.quantity <= (item.lowStockThreshold ?? 5) ? COLORS.statusAmber
+                    : COLORS.statusGreen,
                   width: `${Math.min(100, Math.max(4, (item.quantity / Math.max(item.quantity * 1.5, (item.lowStockThreshold ?? 5) * 2 || 10)) * 100))}%`,
                   transition: 'width 0.5s ease',
                 }} />
@@ -497,16 +590,11 @@ export default function ItemDetailPage() {
               </p>
             </div>
 
-            {/* Read-only note for employees */}
             {!isOwnerOrAdmin && (
               <div style={{
-                marginTop:    12,
-                background:   COLORS.statusBlueBg,
-                borderRadius: RADII.md,
-                padding:      '8px 12px',
-                display:      'flex',
-                gap:          6,
-                alignItems:   'center',
+                marginTop: 12, background: COLORS.statusBlueBg,
+                borderRadius: RADII.md, padding: '8px 12px',
+                display: 'flex', gap: 6, alignItems: 'center',
               }}>
                 <Info size={13} color={COLORS.statusBlue} />
                 <p style={{ margin: 0, fontSize: 11, color: COLORS.statusBlue, fontFamily: TYPOGRAPHY.sans }}>
@@ -518,11 +606,8 @@ export default function ItemDetailPage() {
 
           {/* ── Right card — Item Details ── */}
           <div style={{
-            background:   COLORS.cardBg,
-            borderRadius: RADII.xl,
-            padding:      '20px',
-            boxShadow:    SHADOWS.card,
-            border:       `1.5px solid ${COLORS.divider}`,
+            background: COLORS.cardBg, borderRadius: RADII.xl, padding: '20px',
+            boxShadow: SHADOWS.card, border: `1.5px solid ${COLORS.divider}`,
           }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: COLORS.primary, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Item Details
@@ -556,13 +641,8 @@ export default function ItemDetailPage() {
                 </span>
                 {item.isLastDateManuallySet && (
                   <span style={{
-                    fontSize:     10,
-                    background:   COLORS.statusAmberBg,
-                    color:        COLORS.statusAmber,
-                    padding:      '2px 6px',
-                    borderRadius: RADII.sm,
-                    fontWeight:   700,
-                    fontFamily:   TYPOGRAPHY.sans,
+                    fontSize: 10, background: COLORS.statusAmberBg, color: COLORS.statusAmber,
+                    padding: '2px 6px', borderRadius: RADII.sm, fontWeight: 700, fontFamily: TYPOGRAPHY.sans,
                   }}>
                     M — Manually set
                   </span>
@@ -594,90 +674,68 @@ export default function ItemDetailPage() {
 
         {/* ── Restock History ── */}
         <div style={{
-          background:   COLORS.cardBg,
-          borderRadius: RADII.xl,
-          boxShadow:    SHADOWS.card,
-          border:       `1.5px solid ${COLORS.divider}`,
-          overflow:     'hidden',
+          background: COLORS.cardBg, borderRadius: RADII.xl,
+          boxShadow: SHADOWS.card, border: `1.5px solid ${COLORS.divider}`,
+          overflow: 'hidden',
         }}>
           <div style={{
-            padding:      '14px 20px',
-            borderBottom: `1px solid ${COLORS.divider}`,
-            display:      'flex',
-            alignItems:   'center',
-            gap:          8,
-            background:   COLORS.tableHeader,
+            padding: '14px 20px', borderBottom: `1px solid ${COLORS.divider}`,
+            display: 'flex', alignItems: 'center', gap: 8, background: COLORS.tableHeader,
           }}>
             <History size={16} color={COLORS.primary} />
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: COLORS.primary, fontFamily: TYPOGRAPHY.sans }}>
               Restock History
             </h3>
             <span style={{
-              marginLeft:   'auto',
-              background:   COLORS.primaryLight,
-              color:        COLORS.primary,
-              fontSize:     11,
-              fontWeight:   700,
-              padding:      '2px 8px',
-              borderRadius: RADII.full,
-              fontFamily:   TYPOGRAPHY.sans,
+              marginLeft: 'auto', background: COLORS.primaryLight, color: COLORS.primary,
+              fontSize: 11, fontWeight: 700, padding: '2px 8px',
+              borderRadius: RADII.full, fontFamily: TYPOGRAPHY.sans,
             }}>
               {restockHistory.length} batch{restockHistory.length !== 1 ? 'es' : ''}
             </span>
           </div>
 
-          {/* Loading */}
           {historyLoading && (
             <div style={{ textAlign: 'center', padding: '32px 20px' }}>
               <div style={{
-                width:          28,
-                height:         28,
-                border:         `2px solid ${COLORS.tableHeader}`,
+                width: 28, height: 28,
+                border: `2px solid ${COLORS.tableHeader}`,
                 borderTopColor: COLORS.primary,
-                borderRadius:   '50%',
-                animation:      'sgaSpin 0.7s linear infinite',
-                margin:         '0 auto',
+                borderRadius: '50%',
+                animation: 'sgaSpin 0.7s linear infinite',
+                margin: '0 auto',
               }} />
             </div>
           )}
 
-          {/* Empty */}
           {!historyLoading && restockHistory.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 20px', color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, fontSize: 14 }}>
               No restock history found.
             </div>
           )}
 
-          {/* History rows */}
           {!historyLoading && restockHistory.length > 0 && (
             <>
-              {/* Desktop column headers */}
               {!isMobile && (
                 <div style={{
-                  display:             'grid',
+                  display: 'grid',
                   gridTemplateColumns: '1.4fr 90px 130px 1.2fr 120px 100px',
-                  padding:             '9px 20px',
-                  borderBottom:        `1px solid ${COLORS.divider}`,
+                  padding: '9px 20px', borderBottom: `1px solid ${COLORS.divider}`,
                 }}>
                   {['Date', 'Qty Added', 'Price/Unit', 'Vendor', 'Added By', 'Type'].map((h) => (
                     <span key={h} style={{
-                      fontSize:      10,
-                      fontWeight:    700,
-                      color:         COLORS.textSecondary,
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.6,
-                      fontFamily:    TYPOGRAPHY.sans,
+                      fontSize: 10, fontWeight: 700, color: COLORS.textSecondary,
+                      textTransform: 'uppercase', letterSpacing: 0.6, fontFamily: TYPOGRAPHY.sans,
                     }}>
                       {h}
                     </span>
                   ))}
                 </div>
               )}
-
               {restockHistory.map((entry, idx) => (
                 isMobile
-                  ? <MobileHistoryRow   key={entry.id} entry={entry} />
-                  : <DesktopHistoryRow  key={entry.id} entry={entry} isLast={idx === restockHistory.length - 1} />
+                  ? <MobileHistoryRow  key={entry.id} entry={entry} />
+                  : <DesktopHistoryRow key={entry.id} entry={entry} isLast={idx === restockHistory.length - 1} />
               ))}
             </>
           )}
@@ -695,6 +753,16 @@ export default function ItemDetailPage() {
             fetchItem(item.id);
             fetchRestockHistory(item.id);
           }}
+        />
+      )}
+
+      {/* ── Delete Confirmation Modal ── */}
+      {showDeleteModal && (
+        <DeleteItemModal
+          itemName={item.itemName}
+          onConfirm={handleDeleteConfirmed}
+          onCancel={() => setShowDeleteModal(false)}
+          isDeleting={isDeleting}
         />
       )}
 
