@@ -1,10 +1,11 @@
+// SGA — Last updated: Added Discount section between Invoice Total and Payment Method selection
 // ============================================================
-// InvoiceStepPayment.jsx — Step 4: Payment Details + GST + Date
+// InvoiceStepPayment.jsx — Step 4: Payment Details + GST + Discount + Date
 // Phase 4 — Shree Ganesh Automobile
 // ============================================================
 
 import { useState } from "react";
-import { Calendar, Info } from "lucide-react";
+import { Calendar, Info, Tag, Check } from "lucide-react";
 import {
   PAYMENT_METHODS,
   requiresLoanFields,
@@ -34,13 +35,39 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
   const isDateOverridden = data.isDateOverridden || false;
   const todayStr = new Date().toISOString().split("T")[0];
 
+  // Discount state — local draft + confirmed
+  const [discountDraft, setDiscountDraft] = useState(
+    data.discountAmount ? String(data.discountAmount) : ""
+  );
+  const [discountConfirmed, setDiscountConfirmed] = useState(
+    !!(data.discountAmount && data.discountAmount > 0)
+  );
+
+  // Recompute totals with current discount
   const baseTotals = calculateTotals({ items, labourCost });
   const subtotal = baseTotals.subtotal;
   const cgst = gstEnabled ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
   const sgst = gstEnabled ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
-  const totalAmount = parseFloat((subtotal + cgst + sgst).toFixed(2));
+  const preDiscountTotal = parseFloat((subtotal + cgst + sgst).toFixed(2));
+
+  const confirmedDiscount = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
+  const totalAmount = parseFloat(Math.max(0, preDiscountTotal - confirmedDiscount).toFixed(2));
   const balanceDue = Math.max(0, totalAmount - (parseFloat(amountPaid) || 0));
   const paymentStatus = derivePaymentStatus(paymentMethod, amountPaid, totalAmount);
+
+  // Push updated totals including discount to parent form
+  const pushTotals = (newDiscount) => {
+    const disc = parseFloat(newDiscount || 0);
+    const newTotal = parseFloat(Math.max(0, preDiscountTotal - disc).toFixed(2));
+    onChange({
+      subtotal,
+      cgst,
+      sgst,
+      preDiscountTotal,
+      discountAmount: disc,
+      totalAmount: newTotal,
+    });
+  };
 
   const handleChange = (field, value) => {
     const updates = { [field]: value };
@@ -48,9 +75,13 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
     if (field === "gstEnabled") {
       const newCgst = value ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
       const newSgst = value ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
-      const newTotal = parseFloat((subtotal + newCgst + newSgst).toFixed(2));
+      const newPreDiscount = parseFloat((subtotal + newCgst + newSgst).toFixed(2));
+      const disc = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
+      const newTotal = parseFloat(Math.max(0, newPreDiscount - disc).toFixed(2));
       updates.cgst = newCgst;
       updates.sgst = newSgst;
+      updates.preDiscountTotal = newPreDiscount;
+      updates.discountAmount = disc;
       updates.totalAmount = newTotal;
     }
 
@@ -65,7 +96,24 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
       updates.isDateOverridden = value !== todayStr;
     }
 
-    onChange({ ...updates, totalAmount, subtotal, cgst, sgst });
+    onChange({ ...updates, totalAmount, subtotal, cgst, sgst, preDiscountTotal });
+  };
+
+  const handleConfirmDiscount = () => {
+    const disc = parseFloat(discountDraft || 0);
+    if (isNaN(disc) || disc < 0) return;
+    if (disc > preDiscountTotal) {
+      alert("Discount cannot be more than the invoice total.");
+      return;
+    }
+    setDiscountConfirmed(true);
+    pushTotals(disc);
+  };
+
+  const handleRemoveDiscount = () => {
+    setDiscountDraft("");
+    setDiscountConfirmed(false);
+    pushTotals(0);
   };
 
   const inputStyle = {
@@ -246,13 +294,13 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
         </div>
       )}
 
-      {/* ── Total so far ────────────────────────────── */}
+      {/* ── Invoice Total (before discount) ─────────── */}
       <div
         style={{
           background: "#F5E6E6",
           borderRadius: 10,
           padding: "12px 16px",
-          marginBottom: 16,
+          marginBottom: 12,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -270,9 +318,180 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
             fontFamily: "'Courier New', monospace",
           }}
         >
-          {formatCurrency(totalAmount)}
+          {formatCurrency(preDiscountTotal)}
         </span>
       </div>
+
+      {/* ── Discount Section ────────────────────────── */}
+      <div
+        style={{
+          background: discountConfirmed
+            ? (isDark ? "#1A1A2A" : "#F0F4FF")
+            : cardBg,
+          border: `1.5px solid ${discountConfirmed ? "#8B3A3A" : border}`,
+          borderRadius: 10,
+          padding: "14px 16px",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <Tag size={15} color="#661F1F" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#661F1F" }}>
+            Discount (optional)
+          </span>
+          {discountConfirmed && confirmedDiscount > 0 && (
+            <span
+              style={{
+                marginLeft: "auto",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#661F1F",
+                background: "#F5E6E6",
+                padding: "2px 8px",
+                borderRadius: 99,
+                border: "1px solid #E8C8C8",
+              }}
+            >
+              - {formatCurrency(confirmedDiscount)}
+            </span>
+          )}
+        </div>
+
+        {!discountConfirmed ? (
+          <div>
+            <div style={{ fontSize: 12, color: textSecondary, marginBottom: 8 }}>
+              Enter the discount amount to offer to this customer. Leave empty for no discount.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    fontSize: 16,
+                    color: "#661F1F",
+                    fontWeight: 700,
+                    pointerEvents: "none",
+                  }}
+                >
+                  ₹
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={preDiscountTotal}
+                  step={1}
+                  value={discountDraft}
+                  onChange={(e) => setDiscountDraft(e.target.value)}
+                  placeholder="0"
+                  style={{
+                    ...inputStyle,
+                    paddingLeft: 28,
+                    fontFamily: "'Courier New', monospace",
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                  onBlur={(e) => (e.target.style.borderColor = border)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleConfirmDiscount();
+                  }}
+                />
+              </div>
+              <button
+                onClick={handleConfirmDiscount}
+                disabled={!discountDraft || parseFloat(discountDraft) <= 0}
+                style={{
+                  padding: "0 16px",
+                  background: discountDraft && parseFloat(discountDraft) > 0 ? "#661F1F" : (isDark ? "#333" : "#E0D8D4"),
+                  border: "none",
+                  borderRadius: 8,
+                  color: discountDraft && parseFloat(discountDraft) > 0 ? "#FFFFFF" : textSecondary,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: discountDraft && parseFloat(discountDraft) > 0 ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                  minHeight: 44,
+                }}
+              >
+                <Check size={15} /> Confirm
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "8px 12px",
+                background: isDark ? "#2A2A2A" : "#FFFFFF",
+                borderRadius: 8,
+                border: `1px solid #E8C8C8`,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#661F1F" }}>
+                  Discount Applied
+                </div>
+                <div style={{ fontSize: 11, color: textSecondary, marginTop: 2 }}>
+                  Customer saves {formatCurrency(confirmedDiscount)}
+                </div>
+              </div>
+              <button
+                onClick={handleRemoveDiscount}
+                style={{
+                  background: "none",
+                  border: `1px solid #E8C8C8`,
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  color: textSecondary,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Revised Total (only shown when discount > 0) ─ */}
+      {discountConfirmed && confirmedDiscount > 0 && (
+        <div
+          style={{
+            background: isDark ? "#1A2A1A" : "#E8F5E9",
+            borderRadius: 10,
+            padding: "12px 16px",
+            marginBottom: 16,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            border: "1.5px solid #A5D6A7",
+          }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1A7A1A" }}>
+            Revised Total
+          </span>
+          <span
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: "#1A7A1A",
+              fontFamily: "'Courier New', monospace",
+            }}
+          >
+            {formatCurrency(totalAmount)}
+          </span>
+        </div>
+      )}
 
       {/* ── Payment Method ──────────────────────────── */}
       <div style={fieldGroup}>

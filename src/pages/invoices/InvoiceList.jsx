@@ -1,3 +1,4 @@
+// SGA — Last updated: Added Return Invoice button in header; return invoices get subtle left-border highlight in list
 // SGA — Last updated: Added select-mode + 2-step DELETE confirmation for individual invoice deletion
 // ============================================================
 // InvoiceList.jsx — Invoice list + Pending Approvals section
@@ -15,8 +16,9 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus, Search, Filter, X, Clock, CheckCircle2, XCircle,
-  AlertTriangle, Trash2,
+  AlertTriangle, Trash2, RotateCcw,
 } from "lucide-react";
+import { isReturnInvoice } from "../../lib/invoiceHelpers";
 import useInvoiceStore from "../../store/invoiceStore";
 import useAuthStore from "../../store/authStore";
 import useThemeStore from "../../store/themeStore";
@@ -128,8 +130,17 @@ function DeleteConfirmModal({ count, onConfirm, onCancel, isDeleting, isDark, bo
 // ─── Selectable Invoice Card Wrapper ─────────────────────────────────────────
 // Wraps existing InvoiceCard with a small checkbox overlay in select mode.
 function SelectableInvoiceCard({ invoice, onClick, darkMode, selectMode, selected, onSelect }) {
+  const isReturn = isReturnInvoice(invoice);
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{
+        position: "relative",
+        // Subtle left border tint for return invoices — just a visual signal
+        borderLeft: isReturn ? "3px solid #8B3A3A" : "none",
+        marginLeft: isReturn ? 0 : 0,
+        borderRadius: isReturn ? "0 0 0 0" : 0,
+      }}
+    >
       {selectMode && (
         <div
           onClick={(e) => { e.stopPropagation(); onSelect(); }}
@@ -158,6 +169,7 @@ function SelectableInvoiceCard({ invoice, onClick, darkMode, selectMode, selecte
           invoice={invoice}
           onClick={selectMode ? onSelect : (id) => onClick(id)}
           darkMode={darkMode}
+          isReturn={isReturn}
         />
       </div>
     </div>
@@ -347,19 +359,38 @@ export default function InvoiceList() {
               </button>
             )}
 
-            {/* New invoice button — hidden in select mode */}
+            {/* New / Return invoice buttons — hidden in select mode */}
             {!selectMode && (isOwnerOrAbove || role === "employee") && (
-              <button
-                onClick={() => navigate("/invoices/new")}
-                style={{
-                  background: "#FFFFFF", color: "#661F1F", border: "none",
-                  borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 13,
-                  cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
-                  fontFamily: "inherit",
-                }}
-              >
-                <Plus size={16} /> New
-              </button>
+              <>
+                {/* Return Invoice button — Owner and above only */}
+                {isOwnerOrAbove && (
+                  <button
+                    onClick={() => navigate("/invoices/return/new")}
+                    title="Create Return Invoice"
+                    style={{
+                      background: "rgba(255,255,255,0.12)", color: "rgba(255,220,200,0.9)",
+                      border: "1.5px solid rgba(255,255,255,0.25)",
+                      borderRadius: 10, padding: "9px 12px", fontWeight: 600, fontSize: 12,
+                      cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <RotateCcw size={14} /> Return
+                  </button>
+                )}
+                {/* New invoice button */}
+                <button
+                  onClick={() => navigate("/invoices/new")}
+                  style={{
+                    background: "#FFFFFF", color: "#661F1F", border: "none",
+                    borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 13,
+                    cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <Plus size={16} /> New
+                </button>
+              </>
             )}
           </div>
         </div>

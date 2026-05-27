@@ -1,4 +1,4 @@
-// SGA — Last updated: Added select-mode + 2-step DELETE confirmation for individual inventory item deletion
+// SGA — Last updated: Added Returned Items indicator in summary strip (clickable, shows modal with per-item return quantities); tracks returnedQuantity field set on return invoice approval
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -27,7 +27,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Plus, Search, SlidersHorizontal, RefreshCw, Trash2 } from 'lucide-react';
+import { Package, Plus, Search, SlidersHorizontal, RefreshCw, Trash2, RotateCcw, X } from 'lucide-react';
 
 import useInventoryStore from '../../store/inventoryStore';
 import useAuthStore      from '../../store/authStore';
@@ -463,6 +463,7 @@ export default function InventoryPage() {
   const [replenishTarget,    setReplenishTarget]     = useState(null);
 
   // ── Select / Delete state ─────────────────────────────────────────────────
+  const [showReturnedModal, setShowReturnedModal] = useState(false);
   const [selectMode,      setSelectMode]      = useState(false);
   const [selectedIds,     setSelectedIds]     = useState(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -498,6 +499,10 @@ export default function InventoryPage() {
   const inStockCount    = items.filter((i) => i.quantity > (i.lowStockThreshold ?? 5)).length;
   const lowCount        = items.filter((i) => i.quantity > 0 && i.quantity <= (i.lowStockThreshold ?? 5)).length;
   const outOfStockCount = items.filter((i) => i.quantity <= 0).length;
+  // Total returned quantity across all items (from returnedQuantity field updated on return invoice approval)
+  const returnedCount = items.reduce((sum, i) => sum + (i.returnedQuantity || 0), 0);
+  // Items that have had at least one return
+  const returnedItems = items.filter((i) => (i.returnedQuantity || 0) > 0);
 
   const handleReplenish = (item) => {
     setReplenishTarget(item);
@@ -975,6 +980,14 @@ export default function InventoryPage() {
             <SummaryPill label="In Stock"        value={inStockCount}    color={COLORS.statusGreen} />
             <SummaryPill label="Low Stock"       value={lowCount}        color={COLORS.statusAmber} />
             <SummaryPill label="Out of Stock"    value={outOfStockCount} color={COLORS.statusRed} />
+            <div style={{ width: 1, height: 18, background: COLORS.divider }} />
+            <SummaryPill
+              label="Returned Items"
+              value={returnedCount}
+              color="#8B3A3A"
+              onClick={returnedCount > 0 ? () => setShowReturnedModal(true) : undefined}
+              clickable={returnedCount > 0}
+            />
           </div>
         )}
       </div>
@@ -1079,6 +1092,82 @@ export default function InventoryPage() {
         />
       )}
 
+      {/* ── Returned Items Modal ── */}
+      {showReturnedModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+          onClick={() => setShowReturnedModal(false)}
+        >
+          <div
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '16px 16px 0 0',
+              padding: '20px 20px 32px',
+              width: '100%',
+              maxWidth: 560,
+              maxHeight: '75vh',
+              overflow: 'auto',
+              boxShadow: '0 -8px 40px rgba(0,0,0,0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#F5E6E6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <RotateCcw size={17} color="#8B3A3A" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#222', fontFamily: TYPOGRAPHY.sans }}>Returned Items</div>
+                  <div style={{ fontSize: 12, color: '#888', fontFamily: TYPOGRAPHY.sans }}>Total returned: {returnedCount} unit{returnedCount !== 1 ? 's' : ''}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowReturnedModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 4 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Info note */}
+            <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#CC6600', fontFamily: TYPOGRAPHY.sans }}>
+              These are items returned by customers via Return Invoices (RET_INV). Quantities shown are cumulative totals added back to stock from all approved return invoices.
+            </div>
+
+            {/* Items list */}
+            {returnedItems.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#888', padding: 30, fontFamily: TYPOGRAPHY.sans }}>No returned items yet.</div>
+            ) : (
+              returnedItems.map((item, idx) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '12px 14px',
+                    background: idx % 2 === 0 ? '#FDFAF8' : '#FFFFFF',
+                    borderRadius: 8,
+                    marginBottom: 6,
+                    border: '1px solid #E8E2DF',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#222', fontFamily: TYPOGRAPHY.sans }}>{item.itemName}</div>
+                    <div style={{ fontSize: 11, color: '#888', fontFamily: TYPOGRAPHY.sans, marginTop: 2 }}>
+                      Current stock: {item.quantity} · Category: {getCategoryName(item.categoryId)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#8B3A3A', fontFamily: TYPOGRAPHY.mono }}>{item.returnedQuantity}</div>
+                    <div style={{ fontSize: 10, color: '#888', fontFamily: TYPOGRAPHY.sans }}>returned</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes sgaSpin { to { transform: rotate(360deg); } }
       `}</style>
@@ -1086,14 +1175,21 @@ export default function InventoryPage() {
   );
 }
 
-function SummaryPill({ label, value, color }) {
+function SummaryPill({ label, value, color, onClick, clickable }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: clickable ? 'pointer' : 'default', padding: clickable ? '4px 8px' : '0', borderRadius: 8, transition: 'background 0.15s' }}
+      onClick={onClick}
+      title={clickable ? `Click to view ${label}` : undefined}
+      onMouseEnter={(e) => { if (clickable) e.currentTarget.style.background = '#F5EDED'; }}
+      onMouseLeave={(e) => { if (clickable) e.currentTarget.style.background = 'transparent'; }}
+    >
       {color && <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />}
       <span style={{ fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>{label}:</span>
       <span style={{ fontSize: 15, fontWeight: 700, color: color || COLORS.primary, fontFamily: TYPOGRAPHY.sans }}>
         {value}
       </span>
+      {clickable && <span style={{ fontSize: 10, color: color || COLORS.primary, marginLeft: 2 }}>↗</span>}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+// SGA — Last updated: Added createReturnInvoice + approveReturnInvoice (adds items back to inventory on approval); generateReturnInvoiceNumber (RET_INV format)
 // ============================================================
 // invoiceStore.js — Zustand store for Invoice Module
 // Phase 4 — Shree Ganesh Automobile
@@ -49,6 +50,27 @@ async function generateInvoiceNumber() {
 }
 
 // ── store ────────────────────────────────────────────────────
+
+// Generate return invoice number: RET_INV-YYYY-NNNN
+async function generateReturnInvoiceNumber() {
+  const year = new Date().getFullYear();
+  const q = query(collection(db, INVOICE_COLLECTION), orderBy("createdAt", "desc"), limit(100));
+  const snap = await getDocs(q);
+  let seq = 1;
+  if (!snap.empty) {
+    const returnNos = snap.docs
+      .map((d) => d.data().invoiceNo || "")
+      .filter((no) => no.startsWith("RET_INV-"));
+    if (returnNos.length > 0) {
+      const nums = returnNos
+        .map((no) => { const m = no.match(/RET_INV-\d{4}-(\d+)/); return m ? parseInt(m[1], 10) : 0; })
+        .filter((n) => n > 0);
+      if (nums.length > 0) seq = Math.max(...nums) + 1;
+    }
+  }
+  return `RET_INV-${year}-${String(seq).padStart(4, "0")}`;
+}
+
 const useInvoiceStore = create((set, get) => ({
   // ── state ──────────────────────────────────────────────────
   invoices: [],
@@ -332,6 +354,91 @@ const useInvoiceStore = create((set, get) => ({
   },
 
   // ── cleanup ────────────────────────────────────────────────
+
+  // ── create return invoice ─────────────────────────────────────────────
+  createReturnInvoice: async (invoiceData, currentUser) => {
+    const { dbLocked } = get();
+    if (dbLocked) throw new Error("Invoice database is currently locked.");
+    if (!currentUser) throw new Error("Authentication error.");
+    set({ loading: true, error: null });
+    try {
+      const invoiceNo = await generateReturnInvoiceNumber();
+      const createdByName = currentUser.displayName || currentUser.email || currentUser.uid || "Unknown";
+      const returnItems = invoiceData.returnItems || [];
+      const totalReturnAmount = parseFloat(
+        returnItems.reduce((sum, i) => sum + parseFloat(i.returnPrice || 0) * parseInt(i.quantity || 0, 10), 0).toFixed(2)
+      );
+      const payload = {
+        ...invoiceData,
+        invoiceNo,
+        invoiceType: "RETURN",
+        status: "PENDING",
+        paymentStatus: "UNPAID",
+        totalReturnAmount,
+        totalAmount: totalReturnAmount,
+        createdBy: currentUser.uid,
+        createdByName,
+        approvedBy: null,
+        approvedAt: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, INVOICE_COLLECTION), payload);
+      await logAudit("return_invoice_created", ref.id, INVOICE_COLLECTION, {
+        invoiceNo, customerName: invoiceData.customerSnapshot?.name,
+        totalReturnAmount, createdByName, itemCount: returnItems.length,
+      });
+      set({ loading: false });
+      return ref.id;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // ── approve return invoice (adds items BACK to inventory) ─────────────
+  approveReturnInvoice: async (invoiceId, currentUser) => {
+    const { dbLocked } = get();
+    if (dbLocked) throw new Error("Invoice database is currently locked.");
+    if (!currentUser) throw new Error("Authentication error.");
+    set({ loading: true, error: null });
+    try {
+      const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
+      const invoice = invoiceSnap.data();
+      if (invoice.status !== "PENDING") throw new Error("Only PENDING return invoices can be approved.");
+      const batch = writeBatch(db);
+      batch.update(doc(db, INVOICE_COLLECTION, invoiceId), {
+        status: "APPROVED",
+        paymentStatus: "PAID",
+        approvedBy: currentUser.uid,
+        approvedByName: currentUser.displayName || currentUser.email,
+        approvedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      for (const item of invoice.returnItems || []) {
+        if (item.inventoryItemId) {
+          batch.update(doc(db, INVENTORY_COLLECTION, item.inventoryItemId), {
+            quantity: increment(item.quantity),
+            lastReturnedAt: serverTimestamp(),
+            returnedQuantity: increment(item.quantity),
+          });
+        }
+      }
+      await batch.commit();
+      await logAudit("return_invoice_approved", invoiceId, INVOICE_COLLECTION, {
+        invoiceNo: invoice.invoiceNo,
+        approvedByName: currentUser.displayName || currentUser.email,
+        totalReturnAmount: invoice.totalReturnAmount,
+        itemsRestocked: invoice.returnItems?.length || 0,
+      });
+      set({ loading: false });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
   cleanup: () => {
     const { unsubscribeInvoices, unsubscribeSystemConfig } = get();
     if (unsubscribeInvoices) unsubscribeInvoices();

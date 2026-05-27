@@ -1,3 +1,4 @@
+// SGA — Last updated: Added discount display in review; only shows Invoice Total if no discount, shows Invoice Total + Discount + Revised Total if discount exists
 // ============================================================
 // InvoiceStepReview.jsx — Step 5: Review & Submit
 // Phase 4 — Shree Ganesh Automobile
@@ -19,6 +20,8 @@ export default function InvoiceStepReview({ data, darkMode }) {
   const items = data.items || [];
   const labourCost = parseFloat(data.labourCost || 0);
   const totalAmount = parseFloat(data.totalAmount || 0);
+  const discountAmount = parseFloat(data.discountAmount || 0);
+  const preDiscountTotal = parseFloat(data.preDiscountTotal || totalAmount);
   const amountPaid = parseFloat(data.amountPaid || 0);
   const balanceDue = Math.max(0, totalAmount - amountPaid);
   const paymentStatus = data.paymentStatus || "UNPAID";
@@ -26,6 +29,8 @@ export default function InvoiceStepReview({ data, darkMode }) {
   const invoiceDate = data.invoiceDate
     ? new Date(data.invoiceDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : "—";
+
+  const hasDiscount = discountAmount > 0;
 
   const Section = ({ icon: Icon, title, children }) => (
     <div
@@ -65,7 +70,7 @@ export default function InvoiceStepReview({ data, darkMode }) {
     </div>
   );
 
-  const Row = ({ label, value, mono, amber, bold }) => (
+  const Row = ({ label, value, mono, amber, bold, green, red, strike }) => (
     <div
       style={{
         display: "flex",
@@ -79,8 +84,10 @@ export default function InvoiceStepReview({ data, darkMode }) {
         style={{
           fontSize: 13,
           fontWeight: bold ? 700 : 500,
-          color: amber ? "#CC6600" : textPrimary,
+          color: amber ? "#CC6600" : green ? "#1A7A1A" : red ? "#CC0000" : textPrimary,
           fontFamily: mono ? "'Courier New', monospace" : "inherit",
+          textDecoration: strike ? "line-through" : "none",
+          opacity: strike ? 0.6 : 1,
         }}
       >
         {value}
@@ -184,7 +191,32 @@ export default function InvoiceStepReview({ data, darkMode }) {
             marginTop: 4,
           }}
         >
-          <Row label="Total Amount" value={formatCurrency(totalAmount)} mono bold />
+          {/* If discount exists: show Invoice Total (struck out), Discount, Revised Total */}
+          {hasDiscount ? (
+            <>
+              <Row label="Invoice Total" value={formatCurrency(preDiscountTotal)} mono />
+              <Row label="Discount" value={`- ${formatCurrency(discountAmount)}`} mono amber />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 5,
+                  padding: "6px 10px",
+                  background: "#E8F5E9",
+                  borderRadius: 6,
+                  border: "1px solid #C8E6C9",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#1A7A1A" }}>Revised Total</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
+                  {formatCurrency(totalAmount)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <Row label="Total Amount" value={formatCurrency(totalAmount)} mono bold />
+          )}
           <Row label="Amount Paid" value={formatCurrency(amountPaid)} mono />
           <Row
             label="Balance Due"

@@ -1,3 +1,4 @@
+// SGA — Last updated: Added discountAmount and preDiscountTotal to DEFAULT_FORM for discount feature
 // ============================================================
 // CreateInvoice.jsx — 5-Step Invoice Creation Wizard
 // Phase 4 — Shree Ganesh Automobile
@@ -46,6 +47,8 @@ const DEFAULT_FORM = {
   subtotal: 0,
   cgst: 0,
   sgst: 0,
+  preDiscountTotal: 0,
+  discountAmount: 0,
   totalAmount: 0,
 };
 

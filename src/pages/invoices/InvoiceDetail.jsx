@@ -1,3 +1,4 @@
+// SGA — Last updated: Added discount display in invoice detail view; added return invoice approval routing (approveReturnInvoice) (shows Invoice Total, Discount, Revised Total when discount > 0)
 // ============================================================
 // InvoiceDetail.jsx — View, reprint, resend, approve invoice
 // Phase 4 — Shree Ganesh Automobile
@@ -16,7 +17,7 @@ import InvoiceStatusBadge from "../../components/invoices/InvoiceStatusBadge";
 import DBLockedBanner from "../../components/invoices/DBLockedBanner";
 import {
   formatCurrency, formatDate, getDisplayStatus,
-  generateAndDownloadPDF, sendInvoiceViaWhatsApp,
+  generateAndDownloadPDF, sendInvoiceViaWhatsApp, isReturnInvoice,
 } from "../../lib/invoiceHelpers";
 
 export default function InvoiceDetail() {
@@ -27,7 +28,7 @@ export default function InvoiceDetail() {
   const { theme } = useThemeStore();
   const {
     currentInvoice, loadInvoice, dbLocked, dbLockedBy,
-    businessSettings, approveInvoice, rejectInvoice,
+    businessSettings, approveInvoice, approveReturnInvoice, rejectInvoice,
     deleteInvoice, subscribeSystemConfig, loadSettings,
     logPdfDownload, logWhatsAppSent, loading, error,
   } = useInvoiceStore();
@@ -97,8 +98,14 @@ export default function InvoiceDetail() {
     if (!currentUser) return;
     setApprovalLoading("approving");
     try {
-      await approveInvoice(id, currentUser);
-      setActionMsg("Invoice approved! Inventory deducted.");
+      const isReturn = inv?.invoiceType === "RETURN" || inv?.invoiceNo?.startsWith("RET_INV");
+      if (isReturn) {
+        await approveReturnInvoice(id, currentUser);
+        setActionMsg("Return invoice approved! Items added back to inventory.");
+      } else {
+        await approveInvoice(id, currentUser);
+        setActionMsg("Invoice approved! Inventory deducted.");
+      }
       setTimeout(() => setActionMsg(null), 3500);
     } catch (err) {
       alert("Approval failed: " + err.message);
@@ -328,7 +335,18 @@ export default function InvoiceDetail() {
                 </>
               )}
               <div style={{ borderTop: `1px solid ${border}`, paddingTop: 8, marginTop: 4 }}>
-                <Row label="Total Amount" value={formatCurrency(inv.totalAmount || 0)} mono bold />
+                {/* Show discount breakdown if discount was applied */}
+                {parseFloat(inv.discountAmount || 0) > 0 ? (
+                  <>
+                    <Row label="Invoice Total" value={formatCurrency(inv.preDiscountTotal || inv.totalAmount || 0)} mono />
+                    <Row label="Discount" value={`- ${formatCurrency(inv.discountAmount)}`} mono amber />
+                    <div style={{ borderTop: `1px solid ${border}`, paddingTop: 6, marginTop: 4 }}>
+                      <Row label="Revised Total" value={formatCurrency(inv.totalAmount || 0)} mono bold green />
+                    </div>
+                  </>
+                ) : (
+                  <Row label="Total Amount" value={formatCurrency(inv.totalAmount || 0)} mono bold />
+                )}
                 <Row label="Amount Paid" value={formatCurrency(inv.amountPaid || 0)} mono green />
                 <Row
                   label="Balance Due"

@@ -1,3 +1,4 @@
+// SGA — Last updated: Added /invoices/return/new route for CreateReturnInvoice
 // ============================================================
 // InvoiceRoutes.jsx — Phase 4 Route Integration
 // Shree Ganesh Automobile
@@ -12,6 +13,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import InvoiceList from "./InvoiceList";
 import CreateInvoice from "./CreateInvoice";
+import CreateReturnInvoice from "./CreateReturnInvoice";
 import InvoiceDetail from "./InvoiceDetail";
 import PendingPayments from "./PendingPayments";
 

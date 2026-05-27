@@ -1,3 +1,4 @@
+// SGA — Last updated: Added discount support to calculateTotals; added return invoice helpers (RET_INV prefix, returnInvoice type)
 // ============================================================
 // invoiceHelpers.js — Invoice utility functions
 // Phase 4 — Shree Ganesh Automobile
@@ -6,6 +7,7 @@
 import { pdf } from "@react-pdf/renderer";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import InvoicePDFDocument from "../components/invoices/InvoicePDF";
+import ReturnInvoicePDFDocument from "../components/invoices/ReturnInvoicePDF";
 
 // ── Currency formatter ─────────────────────────────────────
 export const formatCurrency = (amount) => {
@@ -55,20 +57,25 @@ export const calculateGST = (subtotal) => {
 };
 
 // ── Invoice totals calculator ──────────────────────────────
-export const calculateTotals = ({ items = [], labourCost = 0, gstEnabled = false }) => {
+// NOW SUPPORTS: discount field (flat rupee amount, applied after GST calculation)
+export const calculateTotals = ({ items = [], labourCost = 0, gstEnabled = false, discount = 0 }) => {
   const itemsTotal = items.reduce((sum, item) => {
     return sum + (parseFloat(item.sellingPrice || 0) * parseInt(item.quantity || 0, 10));
   }, 0);
 
   const subtotal = itemsTotal + parseFloat(labourCost || 0);
   const { cgst, sgst } = gstEnabled ? calculateGST(subtotal) : { cgst: 0, sgst: 0 };
-  const totalAmount = subtotal + cgst + sgst;
+  const preDiscountTotal = subtotal + cgst + sgst;
+  const discountAmount = parseFloat(discount || 0);
+  const totalAmount = Math.max(0, preDiscountTotal - discountAmount);
 
   return {
     itemsTotal: parseFloat(itemsTotal.toFixed(2)),
     subtotal: parseFloat(subtotal.toFixed(2)),
     cgst,
     sgst,
+    preDiscountTotal: parseFloat(preDiscountTotal.toFixed(2)),
+    discountAmount: parseFloat(discountAmount.toFixed(2)),
     totalAmount: parseFloat(totalAmount.toFixed(2)),
   };
 };
@@ -91,6 +98,13 @@ export const PAYMENT_METHODS = [
   { value: "PARTIAL", label: "Partial Payment" },
 ];
 
+// Return invoice payment methods (only cash/upi/card — no loan/emi for returns)
+export const RETURN_PAYMENT_METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "UPI", label: "UPI" },
+  { value: "CARD", label: "Card" },
+];
+
 export const requiresLoanFields = (method) =>
   ["LOAN", "EMI"].includes(method);
 
@@ -108,11 +122,18 @@ export const derivePaymentStatus = (method, amountPaid, totalAmount) => {
   return "PARTIALLY_PAID";
 };
 
+// ── Is a return invoice? ───────────────────────────────────
+export const isReturnInvoice = (invoice) =>
+  invoice?.invoiceType === "RETURN" ||
+  invoice?.invoiceNo?.startsWith("RET_INV");
+
 // ── PDF generation & download ──────────────────────────────
 export const generateAndDownloadPDF = async (invoice, businessSettings) => {
   try {
+    // Use return invoice PDF for return invoices
+    const Component = isReturnInvoice(invoice) ? ReturnInvoicePDFDocument : InvoicePDFDocument;
     const blob = await pdf(
-      <InvoicePDFDocument invoice={invoice} businessSettings={businessSettings} />
+      <Component invoice={invoice} businessSettings={businessSettings} />
     ).toBlob();
 
     const url = URL.createObjectURL(blob);
@@ -132,8 +153,9 @@ export const generateAndDownloadPDF = async (invoice, businessSettings) => {
 
 // ── Get PDF blob (for WhatsApp upload) ────────────────────
 export const getPDFBlob = async (invoice, businessSettings) => {
+  const Component = isReturnInvoice(invoice) ? ReturnInvoicePDFDocument : InvoicePDFDocument;
   return pdf(
-    <InvoicePDFDocument invoice={invoice} businessSettings={businessSettings} />
+    <Component invoice={invoice} businessSettings={businessSettings} />
   ).toBlob();
 };
 

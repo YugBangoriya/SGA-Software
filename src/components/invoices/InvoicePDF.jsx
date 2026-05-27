@@ -1,3 +1,4 @@
+// SGA — Last updated: Added discount support in PDF (Invoice Total + Discount + Revised Total when discount > 0; only Invoice Total when no discount)
 // ============================================================
 // InvoicePDF.jsx — @react-pdf/renderer Invoice Template
 // Phase 4 — Shree Ganesh Automobile
@@ -418,6 +419,8 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
   const gstEnabled = invoice.gstEnabled && biz.gstNumber;
   const cgst = parseFloat(invoice.cgst || 0);
   const sgst = parseFloat(invoice.sgst || 0);
+  const discountAmount = parseFloat(invoice.discountAmount || 0);
+  const preDiscountTotal = parseFloat(invoice.preDiscountTotal || (invoice.totalAmount || 0));
   const totalAmount = parseFloat(invoice.totalAmount || 0);
   const amountPaid = parseFloat(invoice.amountPaid || 0);
   const balanceDue = Math.max(0, totalAmount - amountPaid);
@@ -595,12 +598,37 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
 
             <View style={styles.dividerLine} />
 
-            <View style={styles.grandTotalLine}>
-              <Text style={styles.grandTotalLabel}>TOTAL</Text>
-              <Text style={styles.grandTotalValue}>
-                {formatCurrency(totalAmount)}
-              </Text>
-            </View>
+            {/* If discount: show Invoice Total, Discount, Revised Total. Otherwise just TOTAL */}
+            {discountAmount > 0 ? (
+              <>
+                <View style={styles.totalLine}>
+                  <Text style={styles.totalLabel}>Invoice Total</Text>
+                  <Text style={[styles.totalValue, { color: C.textMid }]}>
+                    {formatCurrency(preDiscountTotal)}
+                  </Text>
+                </View>
+                <View style={styles.totalLine}>
+                  <Text style={[styles.totalLabel, { color: C.amber }]}>Discount</Text>
+                  <Text style={[styles.totalValue, { color: C.amber }]}>
+                    - {formatCurrency(discountAmount)}
+                  </Text>
+                </View>
+                <View style={styles.dividerLine} />
+                <View style={styles.grandTotalLine}>
+                  <Text style={styles.grandTotalLabel}>REVISED TOTAL</Text>
+                  <Text style={styles.grandTotalValue}>
+                    {formatCurrency(totalAmount)}
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <View style={styles.grandTotalLine}>
+                <Text style={styles.grandTotalLabel}>TOTAL</Text>
+                <Text style={styles.grandTotalValue}>
+                  {formatCurrency(totalAmount)}
+                </Text>
+              </View>
+            )}
 
             <View style={[styles.dividerLine, { marginTop: 8 }]} />
 

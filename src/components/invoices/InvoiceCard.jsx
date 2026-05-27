@@ -1,3 +1,4 @@
+// SGA — Last updated: Added isReturn prop for subtle background tint and RETURN badge on return invoices
 // ============================================================
 // InvoiceCard.jsx — Invoice list card with status, date flag
 // Phase 4 — Shree Ganesh Automobile
@@ -7,13 +8,20 @@ import { Car, Phone, Calendar, IndianRupee, ChevronRight } from "lucide-react";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
 import { formatCurrency, formatDate, getDisplayStatus } from "../../lib/invoiceHelpers";
 
-export default function InvoiceCard({ invoice, onClick, darkMode }) {
+export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
   const displayStatus = getDisplayStatus(invoice);
   const isDark = darkMode;
+  // isReturn: subtle background tint — not eye-catching, just a gentle signal
+  const returnTint = isReturn
+    ? (isDark ? "#2A2020" : "#FDF6F6")
+    : (isDark ? "#2A2A2A" : "#FFFFFF");
+  const returnBorder = isReturn
+    ? (isDark ? "#4A2828" : "#EDD8D8")
+    : (isDark ? "#3A3A3A" : "#E8E2DF");
 
   const card = {
-    background: isDark ? "#2A2A2A" : "#FFFFFF",
-    border: `1.5px solid ${isDark ? "#3A3A3A" : "#E8E2DF"}`,
+    background: returnTint,
+    border: `1.5px solid ${returnBorder}`,
     borderRadius: 12,
     padding: "14px 16px",
     cursor: "pointer",
@@ -49,12 +57,29 @@ export default function InvoiceCard({ invoice, onClick, darkMode }) {
               fontFamily: "'Courier New', monospace",
               fontWeight: 700,
               fontSize: 14,
-              color: "#661F1F",
+              color: isReturn ? "#8B3A3A" : "#661F1F",
               letterSpacing: 0.5,
             }}
           >
             {invoice.invoiceNo}
           </span>
+          {isReturn && (
+            <span
+              style={{
+                background: "#F5E6E6",
+                color: "#8B3A3A",
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "2px 6px",
+                borderRadius: 4,
+                fontFamily: "Arial, sans-serif",
+                letterSpacing: 0.5,
+                border: "1px solid #E8C8C8",
+              }}
+            >
+              RETURN
+            </span>
+          )}
           {invoice.isDateOverridden && (
             <span
               style={{
