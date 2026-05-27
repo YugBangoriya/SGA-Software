@@ -1,4 +1,4 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Added select-mode + 2-step DELETE confirmation for individual inventory item deletion
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -13,6 +13,11 @@
  *  - Owner-only: Add Item button + Replenish button per row
  *  - Summary stats strip at bottom
  *  - Mobile FAB for Add Item
+ *  - NEW: Owner/SuperAdmin can enter "Select Mode" via the Trash icon in the
+ *    header. In select mode each row shows a checkbox. Selecting one or more
+ *    items reveals a bottom delete bar. Deleting requires typing "DELETE" in
+ *    a confirmation dialog — same 2-step protection used in Customers,
+ *    Invoices, and Quotations.
  *
  * FIX (Phase 3 Bug): useAuthStore exposes `firebaseUser` and `role`, NOT
  * `user` and `userRole`. The old destructure made both undefined, causing
@@ -22,7 +27,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Plus, Search, SlidersHorizontal, RefreshCw } from 'lucide-react';
+import { Package, Plus, Search, SlidersHorizontal, RefreshCw, Trash2 } from 'lucide-react';
 
 import useInventoryStore from '../../store/inventoryStore';
 import useAuthStore      from '../../store/authStore';
@@ -87,27 +92,153 @@ export function QuantityDisplay({ quantity, threshold }) {
   );
 }
 
+// ─── Delete Confirmation Modal ─────────────────────────────────────────────────
+// Two-step: user must type "DELETE" before the button activates.
+// Identical pattern to CustomerList, InvoiceList, QuotationList.
+
+function DeleteConfirmModal({ count, onConfirm, onCancel, isDeleting }) {
+  const [typed, setTyped] = useState('');
+  const confirmed = typed.trim() === 'DELETE';
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(0,0,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }}
+      onClick={onCancel}
+    >
+      <div style={{
+        background: '#FFFFFF',
+        borderRadius: 16,
+        padding: '28px 24px',
+        maxWidth: 360,
+        width: '100%',
+        boxShadow: '0 12px 48px rgba(0,0,0,0.3)',
+      }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Icon */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%',
+            background: '#FFEBEE',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Trash2 size={22} color="#CC0000" />
+          </div>
+        </div>
+
+        <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: '#222', textAlign: 'center', fontFamily: TYPOGRAPHY.sans }}>
+          Delete {count} Inventory Item{count !== 1 ? 's' : ''}?
+        </h3>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 1.5, fontFamily: TYPOGRAPHY.sans }}>
+          This action is <strong>permanent</strong> and cannot be undone. The selected item{count !== 1 ? 's' : ''} will be removed from inventory.
+        </p>
+
+        <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 600, color: '#444', fontFamily: TYPOGRAPHY.sans }}>
+          Type <strong style={{ color: '#CC0000' }}>DELETE</strong> to confirm:
+        </p>
+        <input
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="Type DELETE here"
+          autoFocus
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: `1.5px solid ${confirmed ? '#CC0000' : '#E8E2DF'}`,
+            borderRadius: 8,
+            fontSize: 14,
+            fontFamily: TYPOGRAPHY.mono,
+            outline: 'none',
+            marginBottom: 16,
+            letterSpacing: 1,
+            boxSizing: 'border-box',
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && confirmed) onConfirm(); }}
+        />
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            disabled={isDeleting}
+            style={{
+              flex: 1, padding: '11px 0',
+              background: 'none',
+              border: '1.5px solid #E8E2DF',
+              borderRadius: 8,
+              color: '#444', fontSize: 14, fontWeight: 600,
+              cursor: 'pointer', fontFamily: TYPOGRAPHY.sans,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!confirmed || isDeleting}
+            style={{
+              flex: 1, padding: '11px 0',
+              background: confirmed && !isDeleting ? '#CC0000' : '#E0C4C4',
+              border: 'none', borderRadius: 8,
+              color: '#FFFFFF', fontSize: 14, fontWeight: 700,
+              cursor: confirmed && !isDeleting ? 'pointer' : 'not-allowed',
+              fontFamily: TYPOGRAPHY.sans,
+              transition: 'background 0.2s',
+            }}
+          >
+            {isDeleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Desktop Table Row ─────────────────────────────────────────────────────
 
-function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClick }) {
+function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClick, selectMode, selected, onSelect }) {
   return (
     <div
-      onClick={onClick}
+      onClick={selectMode ? onSelect : onClick}
       style={{
         display:               'grid',
-        gridTemplateColumns:   '2.5fr 1.2fr 110px 90px 130px 140px 110px',
+        gridTemplateColumns:   selectMode
+          ? '36px 2.5fr 1.2fr 110px 90px 130px 140px 110px'
+          : '2.5fr 1.2fr 110px 90px 130px 140px 110px',
         alignItems:            'center',
         padding:               '13px 18px',
         borderBottom:          `1px solid ${COLORS.divider}`,
         cursor:                'pointer',
         transition:            'background 0.15s',
         gap:                   0,
+        background:            selected ? '#FFF0F0' : 'transparent',
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = '#F0EAE8')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = '#F0EAE8'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = selected ? '#FFF0F0' : 'transparent'; }}
     >
+      {/* Checkbox (select mode only) */}
+      {selectMode && (
+        <div style={{
+          width: 20, height: 20,
+          border: `2px solid ${selected ? '#CC0000' : '#CCBBBB'}`,
+          borderRadius: 4,
+          background: selected ? '#CC0000' : '#FFFFFF',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {selected && (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6l3 3 5-5" stroke="#FFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+      )}
+
       {/* Item Name */}
-      <div>
+      <div style={{ opacity: selectMode && !selected ? 0.7 : 1 }}>
         <p style={{
           margin:     0,
           fontWeight: 600,
@@ -125,7 +256,7 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
       </div>
 
       {/* Category */}
-      <span style={{ fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
+      <span style={{ fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans, opacity: selectMode && !selected ? 0.7 : 1 }}>
         {getCategoryName(item.categoryId)}
       </span>
 
@@ -136,12 +267,12 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
       <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
 
       {/* Purchase Price */}
-      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono }}>
+      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono, opacity: selectMode && !selected ? 0.7 : 1 }}>
         {formatCurrency(item.purchasePrice)}
       </span>
 
       {/* Last Restocked */}
-      <div>
+      <div style={{ opacity: selectMode && !selected ? 0.7 : 1 }}>
         <span style={{ fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
           {formatDate(item.lastRestockedDate)}
         </span>
@@ -162,110 +293,137 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
       </div>
 
       {/* Actions */}
-      {isOwnerOrAdmin ? (
-        <button
-          onClick={(e) => { e.stopPropagation(); onReplenish(item); }}
-          style={{
-            background:   'transparent',
-            color:        COLORS.primary,
-            border:       `1.5px solid ${COLORS.primary}`,
-            borderRadius: RADII.md,
-            padding:      '5px 12px',
-            fontSize:     12,
-            fontWeight:   600,
-            cursor:       'pointer',
-            fontFamily:   TYPOGRAPHY.sans,
-            transition:   'all 0.15s',
-            whiteSpace:   'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = COLORS.primary;
-            e.currentTarget.style.color = '#FFF';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = COLORS.primary;
-          }}
-        >
-          + Replenish
-        </button>
-      ) : (
-        <span style={{ fontSize: 12, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>View only</span>
+      {!selectMode && (
+        isOwnerOrAdmin ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onReplenish(item); }}
+            style={{
+              background:   'transparent',
+              color:        COLORS.primary,
+              border:       `1.5px solid ${COLORS.primary}`,
+              borderRadius: RADII.md,
+              padding:      '5px 12px',
+              fontSize:     12,
+              fontWeight:   600,
+              cursor:       'pointer',
+              fontFamily:   TYPOGRAPHY.sans,
+              transition:   'all 0.15s',
+              whiteSpace:   'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = COLORS.primary;
+              e.currentTarget.style.color = '#FFF';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = COLORS.primary;
+            }}
+          >
+            + Replenish
+          </button>
+        ) : (
+          <span style={{ fontSize: 12, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>View only</span>
+        )
       )}
+      {selectMode && <div />}
     </div>
   );
 }
 
 // ─── Mobile Card Row ───────────────────────────────────────────────────────
 
-function MobileRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClick }) {
+function MobileRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClick, selectMode, selected, onSelect }) {
   return (
     <div
-      onClick={onClick}
+      onClick={selectMode ? onSelect : onClick}
       style={{
         padding:       '14px 16px',
         borderBottom:  `1px solid ${COLORS.divider}`,
         cursor:        'pointer',
         transition:    'background 0.15s',
+        background:    selected ? '#FFF0F0' : 'transparent',
+        display:       'flex',
+        gap:           10,
+        alignItems:    'flex-start',
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = '#F0EAE8')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = '#F0EAE8'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = selected ? '#FFF0F0' : 'transparent'; }}
     >
-      {/* Top row: name + badge */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-        <div style={{ flex: 1, paddingRight: 10 }}>
-          <p style={{ margin: 0, fontWeight: 600, fontSize: 15, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.sans }}>
-            {item.itemName}
-          </p>
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
-            {getCategoryName(item.categoryId)}
-          </p>
+      {/* Checkbox (select mode only) */}
+      {selectMode && (
+        <div style={{
+          width: 20, height: 20, marginTop: 2,
+          border: `2px solid ${selected ? '#CC0000' : '#CCBBBB'}`,
+          borderRadius: 4,
+          background: selected ? '#CC0000' : '#FFFFFF',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {selected && (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6l3 3 5-5" stroke="#FFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </div>
-        <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
-      </div>
+      )}
 
-      {/* Bottom row: stats + replenish */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: 18 }}>
-          <MetaStat label="Qty">
-            <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
-          </MetaStat>
-          <MetaStat label="Price/Unit">
-            <span style={{ fontWeight: 600, fontSize: 13, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono }}>
-              {formatCurrency(item.purchasePrice)}
-            </span>
-          </MetaStat>
-          <MetaStat label="Restocked">
-            <span style={{ fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
-              {formatDate(item.lastRestockedDate)}
-              {item.isLastDateManuallySet && (
-                <span style={{ marginLeft: 4, fontSize: 10, background: COLORS.statusAmberBg, color: COLORS.statusAmber, padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>
-                  M
-                </span>
-              )}
-            </span>
-          </MetaStat>
+      <div style={{ flex: 1, opacity: selectMode && !selected ? 0.7 : 1 }}>
+        {/* Top row: name + badge */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+          <div style={{ flex: 1, paddingRight: 10 }}>
+            <p style={{ margin: 0, fontWeight: 600, fontSize: 15, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.sans }}>
+              {item.itemName}
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
+              {getCategoryName(item.categoryId)}
+            </p>
+          </div>
+          <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
         </div>
 
-        {isOwnerOrAdmin && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onReplenish(item); }}
-            style={{
-              background:   COLORS.primary,
-              color:        '#FFF',
-              border:       'none',
-              borderRadius: RADII.md,
-              padding:      '7px 14px',
-              fontSize:     12,
-              fontWeight:   600,
-              cursor:       'pointer',
-              fontFamily:   TYPOGRAPHY.sans,
-              flexShrink:   0,
-            }}
-          >
-            + Replenish
-          </button>
-        )}
+        {/* Bottom row: stats + replenish */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 18 }}>
+            <MetaStat label="Qty">
+              <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+            </MetaStat>
+            <MetaStat label="Price/Unit">
+              <span style={{ fontWeight: 600, fontSize: 13, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono }}>
+                {formatCurrency(item.purchasePrice)}
+              </span>
+            </MetaStat>
+            <MetaStat label="Restocked">
+              <span style={{ fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
+                {formatDate(item.lastRestockedDate)}
+                {item.isLastDateManuallySet && (
+                  <span style={{ marginLeft: 4, fontSize: 10, background: COLORS.statusAmberBg, color: COLORS.statusAmber, padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>
+                    M
+                  </span>
+                )}
+              </span>
+            </MetaStat>
+          </div>
+
+          {isOwnerOrAdmin && !selectMode && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReplenish(item); }}
+              style={{
+                background:   COLORS.primary,
+                color:        '#FFF',
+                border:       'none',
+                borderRadius: RADII.md,
+                padding:      '7px 14px',
+                fontSize:     12,
+                fontWeight:   600,
+                cursor:       'pointer',
+                fontFamily:   TYPOGRAPHY.sans,
+                flexShrink:   0,
+              }}
+            >
+              + Replenish
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -295,6 +453,7 @@ export default function InventoryPage() {
   const {
     items, categories, lowStockItems, loading, error,
     fetchItems, fetchCategories, getCategoryName,
+    deleteItems,
   } = useInventoryStore();
 
   const [searchQuery,        setSearchQuery]        = useState('');
@@ -303,6 +462,12 @@ export default function InventoryPage() {
   const [showReplenishModal, setShowReplenishModal]  = useState(false);
   const [replenishTarget,    setReplenishTarget]     = useState(null);
 
+  // ── Select / Delete state ─────────────────────────────────────────────────
+  const [selectMode,      setSelectMode]      = useState(false);
+  const [selectedIds,     setSelectedIds]     = useState(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting,      setIsDeleting]      = useState(false);
+
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'superadmin';
 
   useEffect(() => {
@@ -310,12 +475,17 @@ export default function InventoryPage() {
     fetchCategories();
   }, []);
 
+  // Exit select mode when search/category filter changes (prevents confusing state)
+  useEffect(() => {
+    if (selectMode) { setSelectMode(false); setSelectedIds(new Set()); }
+  }, [searchQuery, selectedCategoryId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Filter + search
   const filteredItems = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return items.filter((item) => {
       const matchesSearch =
-        item.itemName.toLowerCase().includes(q) ||
+        (item.itemName || '').toLowerCase().includes(q) ||
         getCategoryName(item.categoryId).toLowerCase().includes(q) ||
         (item.vendorName || '').toLowerCase().includes(q);
       const matchesCategory =
@@ -336,6 +506,34 @@ export default function InventoryPage() {
 
   const handleRowClick = (item) => {
     navigate(`/inventory/${item.id}`);
+  };
+
+  // ── Select / Delete handlers ───────────────────────────────────────────────
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleDeleteConfirmed = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteItems([...selectedIds], user);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    } catch (err) {
+      console.error('[InventoryPage] delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
+    }
   };
 
   return (
@@ -361,43 +559,86 @@ export default function InventoryPage() {
               margin:     0,
               fontFamily: TYPOGRAPHY.sans,
             }}>
-              Inventory
+              {selectMode ? `Select Items to Delete` : 'Inventory'}
             </h1>
             <p style={{
-              color:      '#F0BABA',
+              color:      selectMode ? '#FFB8A0' : '#F0BABA',
               fontSize:   12,
               margin:     '3px 0 0',
               fontFamily: TYPOGRAPHY.sans,
             }}>
-              {items.length} item{items.length !== 1 ? 's' : ''}
-              {lowStockItems.length > 0 && (
-                <span style={{ color: '#FFD0A0', marginLeft: 6 }}>
-                  · {lowStockItems.length} need attention
-                </span>
-              )}
+              {selectMode
+                ? `${selectedIds.size} item${selectedIds.size !== 1 ? 's' : ''} selected — tap to select`
+                : `${items.length} item${items.length !== 1 ? 's' : ''}${lowStockItems.length > 0 ? ` · ${lowStockItems.length} need attention` : ''}`
+              }
             </p>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => { fetchItems(); fetchCategories(); }}
-              style={{
-                background:   'rgba(255,255,255,0.15)',
-                color:        '#FFF',
-                border:       '1.5px solid rgba(255,255,255,0.3)',
-                borderRadius: RADII.md,
-                padding:      '8px 12px',
-                cursor:       'pointer',
-                display:      'flex',
-                alignItems:   'center',
-                gap:          4,
-              }}
-              title="Refresh"
-            >
-              <RefreshCw size={15} />
-              {!isMobile && <span style={{ fontSize: 12, fontFamily: TYPOGRAPHY.sans }}>Refresh</span>}
-            </button>
-            {isOwnerOrAdmin && (
+            {/* Select mode cancel button */}
+            {selectMode && (
+              <button
+                onClick={toggleSelectMode}
+                style={{
+                  background:   'rgba(255,255,255,0.15)',
+                  color:        '#FFF',
+                  border:       '1.5px solid rgba(255,255,255,0.3)',
+                  borderRadius: RADII.md,
+                  padding:      '8px 14px',
+                  cursor:       'pointer',
+                  fontSize:     13,
+                  fontWeight:   600,
+                  fontFamily:   TYPOGRAPHY.sans,
+                }}
+              >
+                Cancel
+              </button>
+            )}
+
+            {/* Trash icon — owner/admin only, not in select mode */}
+            {isOwnerOrAdmin && !selectMode && (
+              <button
+                onClick={toggleSelectMode}
+                title="Select items to delete"
+                style={{
+                  background:   'rgba(255,255,255,0.12)',
+                  color:        '#FFC8C8',
+                  border:       '1.5px solid rgba(255,255,255,0.22)',
+                  borderRadius: RADII.md,
+                  padding:      '8px 10px',
+                  cursor:       'pointer',
+                  display:      'flex',
+                  alignItems:   'center',
+                }}
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+
+            {/* Refresh button — hidden in select mode */}
+            {!selectMode && (
+              <button
+                onClick={() => { fetchItems(); fetchCategories(); }}
+                style={{
+                  background:   'rgba(255,255,255,0.15)',
+                  color:        '#FFF',
+                  border:       '1.5px solid rgba(255,255,255,0.3)',
+                  borderRadius: RADII.md,
+                  padding:      '8px 12px',
+                  cursor:       'pointer',
+                  display:      'flex',
+                  alignItems:   'center',
+                  gap:          4,
+                }}
+                title="Refresh"
+              >
+                <RefreshCw size={15} />
+                {!isMobile && <span style={{ fontSize: 12, fontFamily: TYPOGRAPHY.sans }}>Refresh</span>}
+              </button>
+            )}
+
+            {/* Add button — hidden in select mode */}
+            {isOwnerOrAdmin && !selectMode && (
               <button
                 onClick={() => setShowAddModal(true)}
                 style={{
@@ -427,7 +668,7 @@ export default function InventoryPage() {
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: isMobile ? '14px 12px 0' : '20px 24px 0' }}>
 
         {/* ── Low Stock Banner ── */}
-        {lowStockItems.length > 0 && (
+        {!selectMode && lowStockItems.length > 0 && (
           <LowStockBanner
             items={lowStockItems}
             onItemClick={(item) => navigate(`/inventory/${item.id}`)}
@@ -450,110 +691,128 @@ export default function InventoryPage() {
           </div>
         )}
 
-        {/* ── Search & Filter Bar ── */}
-        <div style={{
-          background:   COLORS.cardBg,
-          borderRadius: RADII.lg,
-          padding:      '12px 16px',
-          marginBottom: 14,
-          boxShadow:    SHADOWS.card,
-          display:      'flex',
-          gap:          10,
-          flexWrap:     'wrap',
-          alignItems:   'center',
-        }}>
-          {/* Search */}
-          <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-            <Search
-              size={15}
-              style={{
-                position:  'absolute',
-                left:      11,
-                top:       '50%',
-                transform: 'translateY(-50%)',
-                color:     COLORS.textSecondary,
-              }}
-            />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, category, vendor..."
-              style={{
-                width:        '100%',
-                padding:      '9px 12px 9px 34px',
-                border:       `1.5px solid ${COLORS.tableHeader}`,
-                borderRadius: RADII.md,
-                fontSize:     14,
-                fontFamily:   TYPOGRAPHY.sans,
-                background:   COLORS.white,
-                color:        COLORS.textPrimary,
-                outline:      'none',
-                boxSizing:    'border-box',
-                transition:   'border-color 0.15s',
-              }}
-              onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
-              onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
-            />
-          </div>
+        {/* ── Search & Filter Bar — hidden in select mode ── */}
+        {!selectMode && (
+          <div style={{
+            background:   COLORS.cardBg,
+            borderRadius: RADII.lg,
+            padding:      '12px 16px',
+            marginBottom: 14,
+            boxShadow:    SHADOWS.card,
+            display:      'flex',
+            gap:          10,
+            flexWrap:     'wrap',
+            alignItems:   'center',
+          }}>
+            {/* Search */}
+            <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+              <Search
+                size={15}
+                style={{
+                  position:  'absolute',
+                  left:      11,
+                  top:       '50%',
+                  transform: 'translateY(-50%)',
+                  color:     COLORS.textSecondary,
+                }}
+              />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, category, vendor..."
+                style={{
+                  width:        '100%',
+                  padding:      '9px 12px 9px 34px',
+                  border:       `1.5px solid ${COLORS.tableHeader}`,
+                  borderRadius: RADII.md,
+                  fontSize:     14,
+                  fontFamily:   TYPOGRAPHY.sans,
+                  background:   COLORS.white,
+                  color:        COLORS.textPrimary,
+                  outline:      'none',
+                  boxSizing:    'border-box',
+                  transition:   'border-color 0.15s',
+                }}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
+              />
+            </div>
 
-          {/* Category Filter */}
-          <div style={{ position: 'relative' }}>
-            <SlidersHorizontal
-              size={14}
-              style={{
-                position:      'absolute',
-                left:          10,
-                top:           '50%',
-                transform:     'translateY(-50%)',
-                color:         COLORS.textSecondary,
-                pointerEvents: 'none',
-              }}
-            />
-            <select
-              value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-              style={{
-                padding:      '9px 12px 9px 30px',
-                border:       `1.5px solid ${COLORS.tableHeader}`,
-                borderRadius: RADII.md,
-                fontSize:     13,
-                fontFamily:   TYPOGRAPHY.sans,
-                background:   COLORS.white,
-                color:        COLORS.textPrimary,
-                outline:      'none',
-                cursor:       'pointer',
-                minWidth:     150,
-                appearance:   'none',
-              }}
-            >
-              <option value="all">All Categories</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-          </div>
+            {/* Category Filter */}
+            <div style={{ position: 'relative' }}>
+              <SlidersHorizontal
+                size={14}
+                style={{
+                  position:      'absolute',
+                  left:          10,
+                  top:           '50%',
+                  transform:     'translateY(-50%)',
+                  color:         COLORS.textSecondary,
+                  pointerEvents: 'none',
+                }}
+              />
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                style={{
+                  padding:      '9px 12px 9px 30px',
+                  border:       `1.5px solid ${COLORS.tableHeader}`,
+                  borderRadius: RADII.md,
+                  fontSize:     13,
+                  fontFamily:   TYPOGRAPHY.sans,
+                  background:   COLORS.white,
+                  color:        COLORS.textPrimary,
+                  outline:      'none',
+                  cursor:       'pointer',
+                  minWidth:     150,
+                  appearance:   'none',
+                }}
+              >
+                <option value="all">All Categories</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
 
-          {/* Clear active filters */}
-          {(searchQuery || selectedCategoryId !== 'all') && (
-            <button
-              onClick={() => { setSearchQuery(''); setSelectedCategoryId('all'); }}
-              style={{
-                background:   COLORS.primaryLight,
-                color:        COLORS.primary,
-                border:       `1px solid ${COLORS.primary}`,
-                borderRadius: RADII.full,
-                padding:      '5px 12px',
-                fontSize:     12,
-                fontWeight:   600,
-                cursor:       'pointer',
-                fontFamily:   TYPOGRAPHY.sans,
-                whiteSpace:   'nowrap',
-              }}
-            >
-              Clear filter
-            </button>
-          )}
-        </div>
+            {/* Clear active filters */}
+            {(searchQuery || selectedCategoryId !== 'all') && (
+              <button
+                onClick={() => { setSearchQuery(''); setSelectedCategoryId('all'); }}
+                style={{
+                  background:   COLORS.primaryLight,
+                  color:        COLORS.primary,
+                  border:       `1px solid ${COLORS.primary}`,
+                  borderRadius: RADII.full,
+                  padding:      '5px 12px',
+                  fontSize:     12,
+                  fontWeight:   600,
+                  cursor:       'pointer',
+                  fontFamily:   TYPOGRAPHY.sans,
+                  whiteSpace:   'nowrap',
+                }}
+              >
+                Clear filter
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Select mode helper text ── */}
+        {selectMode && (
+          <div style={{
+            background:   '#FFF8F8',
+            border:       `1.5px solid #F5C6C6`,
+            borderRadius: RADII.lg,
+            padding:      '10px 16px',
+            marginBottom: 14,
+            fontSize:     13,
+            color:        COLORS.statusRed,
+            fontFamily:   TYPOGRAPHY.sans,
+          }}>
+            Tap any item to select it for deletion. Selected items are highlighted in red.
+          </div>
+        )}
 
         {/* ── Loading State ── */}
         {loading && (
@@ -622,7 +881,9 @@ export default function InventoryPage() {
             {!isMobile && (
               <div style={{
                 display:             'grid',
-                gridTemplateColumns: '2.5fr 1.2fr 110px 90px 130px 140px 110px',
+                gridTemplateColumns: selectMode
+                  ? '36px 2.5fr 1.2fr 110px 90px 130px 140px 110px'
+                  : '2.5fr 1.2fr 110px 90px 130px 140px 110px',
                 background:          COLORS.tableHeader,
                 borderRadius:        `${RADII.lg}px ${RADII.lg}px 0 0`,
                 padding:             '10px 18px',
@@ -630,6 +891,7 @@ export default function InventoryPage() {
                 borderBottom:        'none',
                 gap:                 0,
               }}>
+                {selectMode && <span />}
                 {['Item Name', 'Category', 'Status', 'Qty', 'Price / Unit', 'Last Restocked', ''].map((h) => (
                   <span key={h} style={{
                     fontSize:      11,
@@ -662,6 +924,9 @@ export default function InventoryPage() {
                     isOwnerOrAdmin={isOwnerOrAdmin}
                     onReplenish={handleReplenish}
                     onClick={() => handleRowClick(item)}
+                    selectMode={selectMode}
+                    selected={selectedIds.has(item.id)}
+                    onSelect={() => toggleSelect(item.id)}
                   />
                 ) : (
                   <DesktopRow
@@ -671,6 +936,9 @@ export default function InventoryPage() {
                     isOwnerOrAdmin={isOwnerOrAdmin}
                     onReplenish={handleReplenish}
                     onClick={() => handleRowClick(item)}
+                    selectMode={selectMode}
+                    selected={selectedIds.has(item.id)}
+                    onSelect={() => toggleSelect(item.id)}
                   />
                 )
               )}
@@ -690,7 +958,7 @@ export default function InventoryPage() {
         )}
 
         {/* ── Summary Strip ── */}
-        {!loading && items.length > 0 && (
+        {!loading && items.length > 0 && !selectMode && (
           <div style={{
             background:   COLORS.cardBg,
             borderRadius: RADII.lg,
@@ -711,8 +979,49 @@ export default function InventoryPage() {
         )}
       </div>
 
+      {/* ── Delete Bottom Bar (shown in select mode when items are selected) ── */}
+      {selectMode && selectedIds.size > 0 && (
+        <div style={{
+          position:   'fixed',
+          bottom:     0,
+          left:       0,
+          right:      0,
+          zIndex:     100,
+          background: '#CC0000',
+          padding:    '14px 20px',
+          display:    'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          boxShadow:  '0 -4px 24px rgba(204,0,0,0.35)',
+        }}>
+          <span style={{ color: '#FFF', fontSize: 14, fontWeight: 600, fontFamily: TYPOGRAPHY.sans }}>
+            {selectedIds.size} item{selectedIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            style={{
+              background:   '#FFFFFF',
+              color:        '#CC0000',
+              border:       'none',
+              borderRadius: RADII.md,
+              padding:      '10px 22px',
+              fontSize:     14,
+              fontWeight:   700,
+              cursor:       'pointer',
+              fontFamily:   TYPOGRAPHY.sans,
+              display:      'flex',
+              alignItems:   'center',
+              gap:          6,
+            }}
+          >
+            <Trash2 size={15} />
+            Delete {selectedIds.size}
+          </button>
+        </div>
+      )}
+
       {/* ── Mobile FAB ── */}
-      {isOwnerOrAdmin && isMobile && (
+      {isOwnerOrAdmin && isMobile && !selectMode && (
         <button
           onClick={() => setShowAddModal(true)}
           style={{
@@ -745,9 +1054,6 @@ export default function InventoryPage() {
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
-            // Defensive re-fetch: store.addItem() already calls fetchItems()
-            // internally, but we call it again here so the list is guaranteed
-            // to reflect the new item even if the store's internal fetch fails.
             fetchItems();
           }}
         />
@@ -760,13 +1066,16 @@ export default function InventoryPage() {
           onSuccess={() => {
             setShowReplenishModal(false);
             setReplenishTarget(null);
-            // FIX (Flagged Issue #3): Explicitly refresh the list after a
-            // successful replenish. store.replenishItem() already calls
-            // fetchItems() internally, but this ensures the quantity updates
-            // in the list immediately without needing a manual Refresh click,
-            // even if the store's internal fetch ever fails silently.
             fetchItems();
           }}
+        />
+      )}
+      {showDeleteModal && (
+        <DeleteConfirmModal
+          count={selectedIds.size}
+          onConfirm={handleDeleteConfirmed}
+          onCancel={() => setShowDeleteModal(false)}
+          isDeleting={isDeleting}
         />
       )}
 

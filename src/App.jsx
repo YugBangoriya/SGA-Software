@@ -1,4 +1,4 @@
-// SGA — Last updated: Wrapped all routes in ErrorBoundary to prevent blank screens on JS errors
+// SGA — Last updated: Fixed /inventory/:id route param — changed :id to :itemId so ItemDetailPage useParams() works
 // src/App.jsx — FIXED: All modules wired to real components
 
 import { useEffect }           from "react";
@@ -115,7 +115,14 @@ export default function App() {
               <InventoryPage />
             </ProtectedRoute>
           } />
-          <Route path="/inventory/:id" element={
+          {/*
+           * FIX: Changed :id → :itemId so ItemDetailPage's useParams() correctly
+           * receives { itemId } instead of { id }. The old :id param meant
+           * `const { itemId } = useParams()` always returned undefined, which caused
+           * Firebase doc() to call undefined.indexOf('/') internally → the
+           * "Cannot read properties of undefined (reading 'indexOf')" error.
+           */}
+          <Route path="/inventory/:itemId" element={
             <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
               <ItemDetailPage />
             </ProtectedRoute>
