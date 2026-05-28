@@ -1,3 +1,4 @@
+// SGA — Last updated: Added sellingPrice field to replenish modal; also updates selling price in Firestore on replenish
 /**
  * ReplenishModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add more stock to an EXISTING inventory item.
@@ -76,6 +77,7 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
   const [form, setForm] = useState({
     quantityAdded:         '',
     purchasePrice:         String(item.purchasePrice ?? ''),
+    sellingPrice:          item.sellingPrice != null ? String(item.sellingPrice) : '',
     dateOrderedOrReceived: today,
     vendorName:            item.vendorName ?? '',
     notes:                 '',
@@ -112,6 +114,8 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
       errs.purchasePrice = 'Enter a valid purchase price for this batch';
     if (!form.dateOrderedOrReceived)
       errs.dateOrderedOrReceived = 'Date is required';
+    if (form.sellingPrice !== '' && (isNaN(form.sellingPrice) || Number(form.sellingPrice) < 0))
+      errs.sellingPrice = 'Enter a valid selling price (or leave blank)';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -128,6 +132,7 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
         {
           quantityAdded:         Number(form.quantityAdded),
           purchasePrice:         Number(form.purchasePrice),
+          sellingPrice:          form.sellingPrice !== '' ? Number(form.sellingPrice) : null,
           dateOrderedOrReceived: form.dateOrderedOrReceived,
           vendorName:            form.vendorName.trim(),
           notes:                 form.notes.trim(),
@@ -278,6 +283,28 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
                 style={inputStyle(!!errors.purchasePrice, { fontFamily: TYPOGRAPHY.mono })}
                 onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
                 onBlur={(e)  => (e.target.style.borderColor = errors.purchasePrice ? COLORS.statusRed : COLORS.tableHeader)}
+              />
+            </FormField>
+
+            <FormField
+              label="Selling Price / Unit (₹)"
+              error={errors.sellingPrice}
+              hint="Auto-filled in invoices — leave blank to keep current"
+            >
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.sellingPrice}
+                onChange={set('sellingPrice')}
+                placeholder="0.00"
+                style={inputStyle(!!errors.sellingPrice, {
+                  fontFamily:  TYPOGRAPHY.mono,
+                  borderColor: COLORS.primary,
+                  background:  '#FDFAF8',
+                })}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = errors.sellingPrice ? COLORS.statusRed : COLORS.primary)}
               />
             </FormField>
           </div>

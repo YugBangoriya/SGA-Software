@@ -1,3 +1,4 @@
+// SGA — Last updated: deleteAllInvoices now skips invoices with pending payment (PARTIALLY_PAID, UNPAID, EMI, LOAN) — only fully-paid and return invoices are deleted during monthly backup
 // src/lib/settingsService.js
 // Central service for all /settings and /systemConfig Firestore operations
 // Used by ALL modules that depend on settings values
@@ -68,6 +69,11 @@ export const DEFAULT_SYSTEM_CONFIG = {
   invoiceDbLockedBy: null,
   invoiceDbLockedAt: null,
 };
+
+// ─── Payment statuses that mean payment is still pending ──────────────────────
+// These invoices must NEVER be deleted during monthly backup.
+// They stay in the system until the client collects the full payment.
+const PENDING_PAYMENT_STATUSES = ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"];
 
 // ─── READ ──────────────────────────────────────────────────────────────────────
 
@@ -158,12 +164,6 @@ export async function saveTermsAndConditions(text) {
 // ─── WRITE — Follow-Up Templates ─────────────────────────────────────────────
 
 export async function saveFollowUpTemplate(template) {
-  // FIX: Field names aligned with messagingStore schema.
-  // Messaging module (FollowUpScheduler) reads messageEn/messageHi/messageGu.
-  // Settings previously wrote bodyEn/bodyHi/bodyGu — now corrected.
-  //
-  // Accepts both old field names (bodyEn etc.) and new ones for backward
-  // compatibility with any existing documents that were saved before this fix.
   const messageEn = template.messageEn ?? template.bodyEn ?? "";
   const messageHi = template.messageHi ?? template.bodyHi ?? "";
   const messageGu = template.messageGu ?? template.bodyGu ?? "";
@@ -219,9 +219,42 @@ export async function setInvoiceDbLock(locked, lockedByName) {
   }
 }
 
+// ─── WRITE — Delete All Invoices (Monthly Backup) ─────────────────────────────
+//
+// IMPORTANT: Only deletes invoices whose payment is fully settled.
+// Invoices with pending payment status (PARTIALLY_PAID, UNPAID, EMI, LOAN)
+// are KEPT in the database so the client can continue tracking outstanding balances.
+//
+// Eligible for deletion:
+//   - paymentStatus === "PAID"          → regular paid invoices
+//   - invoiceType === "RETURN" with status === "APPROVED" → approved return invoices
+//   - Any PENDING invoices (not yet approved — no inventory impact)
+//
+// NOT deleted (kept for tracking):
+//   - paymentStatus === "PARTIALLY_PAID"
+//   - paymentStatus === "UNPAID"
+//   - paymentStatus === "EMI"
+//   - paymentStatus === "LOAN"
+//
+// Returns: { deleted: number, skipped: number } so the UI can show how many were kept.
 export async function deleteAllInvoices() {
   const invoicesCol = collection(db, "invoices");
   const snap = await getDocs(invoicesCol);
-  const deletions = snap.docs.map((d) => deleteDoc(d.ref));
-  await Promise.all(deletions);
+
+  const toDelete = [];
+  const toSkip   = [];
+
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    const isPendingPayment = PENDING_PAYMENT_STATUSES.includes(data.paymentStatus);
+    if (isPendingPayment) {
+      toSkip.push(d.id);
+    } else {
+      toDelete.push(d.ref);
+    }
+  });
+
+  await Promise.all(toDelete.map((ref) => deleteDoc(ref)));
+
+  return { deleted: toDelete.length, skipped: toSkip.length };
 }

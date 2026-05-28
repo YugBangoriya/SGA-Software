@@ -1,4 +1,4 @@
-// SGA — Last updated: Added deleteInventoryItem function for individual item deletion feature
+// SGA — Last updated: Added sellingPrice field to addInventoryItem and replenishInventoryItem; sellingPrice stored to Firestore and used in invoice item picker
 /**
  * Inventory Service — Shree Ganesh Automobile
  * All Firestore read/write operations for the Inventory module.
@@ -78,6 +78,7 @@ export const addInventoryItem = async ({ itemData, user }) => {
     categoryId,
     quantityAdded,
     purchasePrice,
+    sellingPrice,
     dateOrderedOrReceived,
     vendorName,
     lowStockThreshold,
@@ -94,6 +95,7 @@ export const addInventoryItem = async ({ itemData, user }) => {
     categoryId:            categoryId || '',
     quantity:              Number(quantityAdded),
     purchasePrice:         Number(purchasePrice),
+    sellingPrice:          sellingPrice != null ? Number(sellingPrice) : null,
     lowStockThreshold:     Number(lowStockThreshold) || 5,
     vendorName:            vendorName?.trim() || '',
     lastRestockedDate:     orderTimestamp,
@@ -144,6 +146,7 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
   const {
     quantityAdded,
     purchasePrice,
+    sellingPrice,
     dateOrderedOrReceived,
     vendorName,
     isDateManuallySet,
@@ -159,9 +162,15 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
     const itemSnap = await transaction.get(itemRef);
     if (!itemSnap.exists()) throw new Error('Inventory item not found');
 
+    // Only update sellingPrice if explicitly provided (non-null)
+    const sellingPriceUpdate = sellingPrice != null
+      ? { sellingPrice: Number(sellingPrice) }
+      : {};
+
     transaction.update(itemRef, {
       quantity:              increment(Number(quantityAdded)),
       purchasePrice:         Number(purchasePrice),
+      ...sellingPriceUpdate,
       vendorName:            vendorName?.trim() || itemSnap.data().vendorName || '',
       lastRestockedDate:     orderTimestamp,
       isLastDateManuallySet: isDateManuallySet ?? false,

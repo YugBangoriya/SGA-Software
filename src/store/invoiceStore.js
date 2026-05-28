@@ -1,4 +1,4 @@
-// SGA — Last updated: Added createReturnInvoice + approveReturnInvoice (adds items back to inventory on approval); generateReturnInvoiceNumber (RET_INV format)
+// SGA — Last updated: Invoice naming changed to INV-DD-MM-YYYY-XXX / RETURN-INV-DD-MM-YYYY-XXX; deleteAllInvoices now excludes pending-payment invoices
 // ============================================================
 // invoiceStore.js — Zustand store for Invoice Module
 // Phase 4 — Shree Ganesh Automobile
@@ -31,45 +31,73 @@ const INVENTORY_COLLECTION = "inventory";
 const SYSTEM_CONFIG_COLLECTION = "systemConfig";
 const SETTINGS_COLLECTION = "settings";
 
-// Generate sequential invoice number: INV-YYYY-NNNN
+// ── Date helper: returns "DD-MM-YYYY" ──────────────────────
+function getTodayDDMMYYYY() {
+  const now = new Date();
+  const dd   = String(now.getDate()).padStart(2, "0");
+  const mm   = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+// Generate sequential invoice number: INV-DD-MM-YYYY-XXX
+// Serial number resets each day based on that day's invoices
 async function generateInvoiceNumber() {
-  const year = new Date().getFullYear();
+  const dateStr = getTodayDDMMYYYY(); // e.g. "28-05-2026"
+  const prefix  = `INV-${dateStr}-`;
+
+  // Query all invoices to find those from today with our prefix
   const q = query(
     collection(db, INVOICE_COLLECTION),
     orderBy("createdAt", "desc"),
-    limit(1)
+    limit(500)
   );
   const snap = await getDocs(q);
-  let seq = 1;
-  if (!snap.empty) {
-    const last = snap.docs[0].data().invoiceNo || "";
-    const match = last.match(/INV-\d{4}-(\d+)/);
-    if (match) seq = parseInt(match[1], 10) + 1;
-  }
-  return `INV-${year}-${String(seq).padStart(4, "0")}`;
+
+  let maxSeq = 0;
+  snap.docs.forEach((d) => {
+    const no = d.data().invoiceNo || "";
+    if (no.startsWith(prefix)) {
+      const parts = no.split("-");
+      const seq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    }
+  });
+
+  return `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
 }
+
+// Generate return invoice number: RETURN-INV-DD-MM-YYYY-XXX
+async function generateReturnInvoiceNumber() {
+  const dateStr = getTodayDDMMYYYY();
+  const prefix  = `RETURN-INV-${dateStr}-`;
+
+  const q = query(
+    collection(db, INVOICE_COLLECTION),
+    orderBy("createdAt", "desc"),
+    limit(500)
+  );
+  const snap = await getDocs(q);
+
+  let maxSeq = 0;
+  snap.docs.forEach((d) => {
+    const no = d.data().invoiceNo || "";
+    if (no.startsWith(prefix)) {
+      const parts = no.split("-");
+      const seq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    }
+  });
+
+  return `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+// ── Payment statuses that mean "fully settled" ─────────────
+// An invoice is eligible for export+delete if its payment is complete.
+// Invoices with these statuses are EXCLUDED from bulk delete (still pending money).
+const PENDING_PAYMENT_STATUSES = ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"];
 
 // ── store ────────────────────────────────────────────────────
-
-// Generate return invoice number: RET_INV-YYYY-NNNN
-async function generateReturnInvoiceNumber() {
-  const year = new Date().getFullYear();
-  const q = query(collection(db, INVOICE_COLLECTION), orderBy("createdAt", "desc"), limit(100));
-  const snap = await getDocs(q);
-  let seq = 1;
-  if (!snap.empty) {
-    const returnNos = snap.docs
-      .map((d) => d.data().invoiceNo || "")
-      .filter((no) => no.startsWith("RET_INV-"));
-    if (returnNos.length > 0) {
-      const nums = returnNos
-        .map((no) => { const m = no.match(/RET_INV-\d{4}-(\d+)/); return m ? parseInt(m[1], 10) : 0; })
-        .filter((n) => n > 0);
-      if (nums.length > 0) seq = Math.max(...nums) + 1;
-    }
-  }
-  return `RET_INV-${year}-${String(seq).padStart(4, "0")}`;
-}
 
 const useInvoiceStore = create((set, get) => ({
   // ── state ──────────────────────────────────────────────────
@@ -140,7 +168,7 @@ const useInvoiceStore = create((set, get) => ({
         const invoices = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const pending = invoices.filter((inv) => inv.status === "PENDING");
         const pendingPayments = invoices.filter((inv) =>
-          ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"].includes(inv.paymentStatus)
+          PENDING_PAYMENT_STATUSES.includes(inv.paymentStatus)
         );
         set({ invoices, pendingInvoices: pending, pendingPaymentInvoices: pendingPayments });
       },
@@ -220,7 +248,6 @@ const useInvoiceStore = create((set, get) => ({
 
     set({ loading: true, error: null });
     try {
-      // Load invoice to get items for deduction
       const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
       if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
       const invoice = invoiceSnap.data();
@@ -229,10 +256,8 @@ const useInvoiceStore = create((set, get) => ({
         throw new Error("Only PENDING invoices can be approved.");
       }
 
-      // Batch: approve invoice + deduct inventory
       const batch = writeBatch(db);
 
-      // Update invoice status
       batch.update(doc(db, INVOICE_COLLECTION, invoiceId), {
         status: "APPROVED",
         approvedBy: currentUser.uid,
@@ -241,7 +266,6 @@ const useInvoiceStore = create((set, get) => ({
         updatedAt: serverTimestamp(),
       });
 
-      // Deduct inventory for each line item
       for (const item of invoice.items || []) {
         if (item.inventoryItemId) {
           batch.update(doc(db, INVENTORY_COLLECTION, item.inventoryItemId), {
@@ -352,8 +376,6 @@ const useInvoiceStore = create((set, get) => ({
       sentByName: currentUser.displayName || currentUser.email,
     });
   },
-
-  // ── cleanup ────────────────────────────────────────────────
 
   // ── create return invoice ─────────────────────────────────────────────
   createReturnInvoice: async (invoiceData, currentUser) => {

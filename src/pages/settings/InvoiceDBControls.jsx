@@ -1,3 +1,4 @@
+// SGA — Last updated: deleteAllInvoices now reports how many invoices were skipped (pending payment) vs deleted; updated workflow tip accordingly
 // src/pages/Settings/components/SuperAdmin/InvoiceDBControls.jsx
 // SuperAdmin: Invoice DB lock/unlock, monthly ZIP backup, delete all invoices
 
@@ -6,7 +7,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { SectionCard, Button, ConfirmDialog, Badge, T } from "./SettingsUI";
 import { setInvoiceDbLock, deleteAllInvoices } from "../../lib/settingsService";
 import { useSettings } from "../../hooks/useSettings";
-import useAuthStore from "../../store/authStore"; // your existing auth store
+import useAuthStore from "../../store/authStore";
 
 const functions = getFunctions();
 const fnExportZip = httpsCallable(functions, "exportInvoicesZip");
@@ -15,14 +16,15 @@ export default function InvoiceDBControls() {
   const { systemConfig, patchSystemConfig } = useSettings();
   const currentUser = useAuthStore((s) => s.userDoc);
 
-  const [lockLoading, setLockLoading] = useState(false);
+  const [lockLoading,   setLockLoading]   = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [confirmLock, setConfirmLock] = useState(false);
+  const [confirmLock,   setConfirmLock]   = useState(false);
   const [confirmUnlock, setConfirmUnlock] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [exportResult, setExportResult] = useState(null);
-  const [error, setError] = useState("");
+  const [exportResult,  setExportResult]  = useState(null);
+  const [deleteResult,  setDeleteResult]  = useState(null); // { deleted, skipped }
+  const [error,         setError]         = useState("");
 
   const isLocked = systemConfig.invoiceDbLocked;
 
@@ -75,11 +77,22 @@ export default function InvoiceDBControls() {
   const handleDeleteAll = async () => {
     setDeleteLoading(true);
     setError("");
+    setDeleteResult(null);
     try {
-      await deleteAllInvoices();
+      const result = await deleteAllInvoices();
+      setDeleteResult(result);
       setConfirmDelete(false);
       setExportResult(null);
-      alert("All invoices deleted successfully. Remember to unlock the database.");
+
+      if (result.skipped > 0) {
+        alert(
+          `✓ Deleted ${result.deleted} invoice${result.deleted !== 1 ? "s" : ""}.\n\n` +
+          `⚠ ${result.skipped} invoice${result.skipped !== 1 ? "s" : ""} with pending payments (Partial / Unpaid / EMI / Loan) were kept in the system. They will appear in Pending Payments.\n\n` +
+          `Remember to unlock the database.`
+        );
+      } else {
+        alert(`✓ All ${result.deleted} invoice${result.deleted !== 1 ? "s" : ""} deleted successfully. Remember to unlock the database.`);
+      }
     } catch (e) {
       setError("Delete failed: " + e.message);
     } finally {
@@ -136,19 +149,11 @@ export default function InvoiceDBControls() {
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {!isLocked ? (
-            <Button
-              variant="danger"
-              onClick={() => setConfirmLock(true)}
-              loading={lockLoading}
-            >
+            <Button variant="danger" onClick={() => setConfirmLock(true)} loading={lockLoading}>
               🔒 Lock Invoice Database
             </Button>
           ) : (
-            <Button
-              variant="secondary"
-              onClick={() => setConfirmUnlock(true)}
-              loading={lockLoading}
-            >
+            <Button variant="secondary" onClick={() => setConfirmUnlock(true)} loading={lockLoading}>
               🔓 Unlock Invoice Database
             </Button>
           )}
@@ -178,9 +183,12 @@ export default function InvoiceDBControls() {
             <li>Lock the invoice database above</li>
             <li>Export the ZIP backup using the button below</li>
             <li>Download and verify the ZIP file</li>
-            <li>Delete all invoices (in the Danger Zone below)</li>
+            <li>Delete invoices (in the Danger Zone below)</li>
             <li>Unlock the database</li>
           </ol>
+          <div style={{ marginTop: 8, padding: "8px 10px", background: "#FFF3CD", borderRadius: 6, border: "1px solid #FFD54F" }}>
+            <strong>Note:</strong> Invoices with <strong>pending payments</strong> (Partial / Unpaid / EMI / Loan) are <strong>never deleted</strong> during the monthly cleanup — they stay in the system so you can continue tracking what's owed.
+          </div>
         </div>
 
         <Button onClick={handleExportZip} loading={exportLoading} variant="secondary">
@@ -224,21 +232,31 @@ export default function InvoiceDBControls() {
 
       {/* ── Danger Zone ───────────────────────────────────────────────────── */}
       <SectionCard
-        title="Danger Zone — Delete All Invoices"
-        subtitle="Permanently removes all invoice records from the database. Irreversible."
+        title="Danger Zone — Delete Settled Invoices"
+        subtitle="Permanently removes fully-paid and return invoices. Pending-payment invoices are kept."
         icon="⚠️"
         danger
       >
         <div style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
-          This action <strong>permanently deletes every invoice record</strong> from Firestore. It cannot be undone.
+          This action <strong>permanently deletes fully-paid and return invoices</strong> from Firestore.
+          It cannot be undone. Invoices with outstanding balances (Partial / Unpaid / EMI / Loan) are
+          <strong> automatically kept</strong> and will continue to appear in Pending Payments.
           Only perform this after completing and verifying a ZIP backup.
         </div>
-        <Button
-          variant="danger"
-          onClick={() => setConfirmDelete(true)}
-          loading={deleteLoading}
-        >
-          🗑 Delete All Invoices
+
+        {/* Show result of last delete if any invoices were skipped */}
+        {deleteResult && deleteResult.skipped > 0 && (
+          <div style={{
+            background: "#FFF8E1", border: "1px solid #FFE082", borderRadius: 8,
+            padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#7A5500",
+          }}>
+            ⚠ Last deletion: <strong>{deleteResult.deleted}</strong> invoice{deleteResult.deleted !== 1 ? "s" : ""} deleted,{" "}
+            <strong>{deleteResult.skipped}</strong> pending-payment invoice{deleteResult.skipped !== 1 ? "s" : ""} kept.
+          </div>
+        )}
+
+        <Button variant="danger" onClick={() => setConfirmDelete(true)} loading={deleteLoading}>
+          🗑 Delete Settled Invoices
         </Button>
       </SectionCard>
 
@@ -265,9 +283,9 @@ export default function InvoiceDBControls() {
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete All Invoices"
-        message="This permanently deletes every invoice from the database. This action cannot be undone. Please ensure you have downloaded and verified the ZIP backup first."
-        confirmLabel="Delete All"
+        title="Delete Settled Invoices"
+        message="This permanently deletes all fully-paid and return invoices. Invoices with pending payments (Partial / Unpaid / EMI / Loan) will be kept. This action cannot be undone. Please ensure you have downloaded and verified the ZIP backup first."
+        confirmLabel="Delete Settled"
         confirmVariant="danger"
         requireTyping="DELETE"
         onConfirm={handleDeleteAll}

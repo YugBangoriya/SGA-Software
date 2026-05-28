@@ -1,3 +1,4 @@
+// SGA — Last updated: Selling price now auto-filled from inventory sellingPrice field; price field is READ-ONLY in invoice (no manual edits allowed); picker shows selling price instead of purchase price
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -7,7 +8,7 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import {
-  Plus, Minus, Trash2, Search, Package, AlertTriangle, X,
+  Plus, Minus, Trash2, Search, Package, AlertTriangle, X, Lock,
 } from "lucide-react";
 import { formatCurrency } from "../../lib/invoiceHelpers";
 
@@ -49,23 +50,38 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
     );
   });
 
+  // ── Determine the effective selling price for an inventory item ──────
+  // Priority: sellingPrice field (set in inventory) → fallback to purchasePrice
+  const getEffectivePrice = (invItem) => {
+    if (invItem.sellingPrice != null && invItem.sellingPrice > 0) {
+      return invItem.sellingPrice;
+    }
+    return invItem.purchasePrice || 0;
+  };
+
   const addItem = (invItem) => {
     const existing = items.find((i) => i.inventoryItemId === invItem.id);
     if (existing) {
       updateQty(invItem.id, existing.quantity + 1);
       return;
     }
+    const effectivePrice = getEffectivePrice(invItem);
     onChange({
       items: [
         ...items,
         {
-          inventoryItemId: invItem.id,
-          name: invItem.itemName,
-          category: invItem.category || "",
-          quantity: 1,
-          sellingPrice: invItem.sellingPrice || invItem.purchasePrice || 0,
-          purchasePrice: invItem.purchasePrice || 0,
-          availableQty: invItem.quantity || 0,
+          inventoryItemId:  invItem.id,
+          name:             invItem.itemName,
+          category:         invItem.category || "",
+          quantity:         1,
+          sellingPrice:     effectivePrice,
+          purchasePrice:    invItem.purchasePrice || 0,
+          availableQty:     invItem.quantity || 0,
+          // Flag whether the price came from the inventory's selling price field
+          // or fell back to purchase price — used to display a tooltip
+          priceSource:      (invItem.sellingPrice != null && invItem.sellingPrice > 0)
+                              ? "inventory_selling"
+                              : "purchase_fallback",
         },
       ],
     });
@@ -86,15 +102,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
     });
   };
 
-  const updatePrice = (inventoryItemId, price) => {
-    onChange({
-      items: items.map((i) =>
-        i.inventoryItemId === inventoryItemId
-          ? { ...i, sellingPrice: parseFloat(price) || 0 }
-          : i
-      ),
-    });
-  };
+  // NOTE: updatePrice is intentionally removed — prices are locked to inventory values.
 
   const itemsTotal = items.reduce(
     (s, i) => s + i.sellingPrice * i.quantity, 0
@@ -107,6 +115,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
         <div style={{ marginBottom: 16 }}>
           {items.map((item) => {
             const isOverQty = item.quantity > item.availableQty;
+            const isFallback = item.priceSource === "purchase_fallback";
             return (
               <div
                 key={item.inventoryItemId}
@@ -139,7 +148,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-                  {/* Qty */}
+                  {/* Qty stepper */}
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <button
                       onClick={() => updateQty(item.inventoryItemId, item.quantity - 1)}
@@ -178,25 +187,31 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                     </button>
                   </div>
 
-                  {/* Price */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-                    <span style={{ fontSize: 13, color: textSecondary }}>₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={item.sellingPrice}
-                      onChange={(e) => updatePrice(item.inventoryItemId, e.target.value)}
-                      style={{
-                        flex: 1, padding: "5px 8px",
-                        border: `1.5px solid ${border}`, borderRadius: 6,
-                        background: isDark ? "#2A2A2A" : "#FFFFFF",
-                        color: textPrimary, fontSize: 13, fontFamily: "inherit",
-                        outline: "none",
-                      }}
-                      onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                      onBlur={(e) => (e.target.style.borderColor = border)}
-                    />
+                  {/* Price — READ-ONLY, locked from inventory */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 4, flex: 1,
+                    background: isDark ? "#222" : "#F9F6F4",
+                    borderRadius: 6, padding: "5px 10px",
+                    border: `1.5px solid ${isDark ? "#3A3A3A" : "#E0D8D4"}`,
+                    opacity: 0.9,
+                  }}>
+                    <Lock size={11} color={isDark ? "#666" : "#AAAAAA"} />
+                    <span style={{ fontSize: 12, color: textSecondary, marginLeft: 2 }}>₹</span>
+                    <span style={{
+                      fontSize: 14, fontWeight: 600, color: textPrimary,
+                      fontFamily: "'Courier New', monospace", flex: 1,
+                    }}>
+                      {item.sellingPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    </span>
+                    {isFallback && (
+                      <span style={{
+                        fontSize: 9, background: "#FFF3E0", color: "#CC6600",
+                        borderRadius: 4, padding: "1px 5px", fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}>
+                        COST
+                      </span>
+                    )}
                   </div>
 
                   {/* Line total */}
@@ -210,6 +225,22 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                     {formatCurrency(item.sellingPrice * item.quantity)}
                   </div>
                 </div>
+
+                {/* Fallback warning — shown when no selling price was set in inventory */}
+                {isFallback && (
+                  <div style={{
+                    marginTop: 7,
+                    padding: "5px 8px",
+                    background: "#FFF8E1",
+                    borderRadius: 5,
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}>
+                    <AlertTriangle size={11} color="#CC6600" />
+                    <span style={{ fontSize: 11, color: "#CC6600" }}>
+                      No selling price set in inventory — using purchase price. Set a selling price in Inventory to fix this.
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -291,6 +322,25 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                   <X size={20} />
                 </button>
               </div>
+
+              {/* Price source legend */}
+              <div style={{
+                display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap",
+              }}>
+                <span style={{
+                  fontSize: 10, background: "#E8F5E9", color: "#1A7A1A",
+                  borderRadius: 4, padding: "2px 7px", fontWeight: 600,
+                }}>
+                  ✓ SELL = Selling price set
+                </span>
+                <span style={{
+                  fontSize: 10, background: "#FFF3E0", color: "#CC6600",
+                  borderRadius: 4, padding: "2px 7px", fontWeight: 600,
+                }}>
+                  COST = Using purchase price
+                </span>
+              </div>
+
               <div style={{ position: "relative" }}>
                 <Search size={15} color="#888" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
                 <input
@@ -321,6 +371,8 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 filteredInventory.map((item) => {
                   const outOfStock = (item.quantity || 0) === 0;
                   const alreadyAdded = items.find((i) => i.inventoryItemId === item.id);
+                  const effectivePrice = getEffectivePrice(item);
+                  const hasSellingPrice = item.sellingPrice != null && item.sellingPrice > 0;
                   return (
                     <div
                       key={item.id}
@@ -361,9 +413,17 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#661F1F", fontFamily: "'Courier New', monospace" }}>
-                          {formatCurrency(item.purchasePrice || 0)}
+                          {formatCurrency(effectivePrice)}
                         </div>
-                        <div style={{ fontSize: 10, color: textSecondary }}>purchase</div>
+                        <div style={{
+                          fontSize: 9,
+                          background: hasSellingPrice ? "#E8F5E9" : "#FFF3E0",
+                          color: hasSellingPrice ? "#1A7A1A" : "#CC6600",
+                          borderRadius: 3, padding: "1px 5px",
+                          fontWeight: 700, display: "inline-block", marginTop: 2,
+                        }}>
+                          {hasSellingPrice ? "SELL" : "COST"}
+                        </div>
                       </div>
                     </div>
                   );

@@ -1,5 +1,4 @@
-// SGA — Last updated: Added Return Invoice button in header; return invoices get subtle left-border highlight in list
-// SGA — Last updated: Added select-mode + 2-step DELETE confirmation for individual invoice deletion
+// SGA — Last updated: Partial-payment invoices now get a distinct teal-blue left-border highlight (different from return invoice rose highlight); InvoiceCard receives isPendingPayment flag via SelectableInvoiceCard wrapper
 // ============================================================
 // InvoiceList.jsx — Invoice list + Pending Approvals section
 // Phase 4 — Shree Ganesh Automobile
@@ -131,14 +130,23 @@ function DeleteConfirmModal({ count, onConfirm, onCancel, isDeleting, isDark, bo
 // Wraps existing InvoiceCard with a small checkbox overlay in select mode.
 function SelectableInvoiceCard({ invoice, onClick, darkMode, selectMode, selected, onSelect }) {
   const isReturn = isReturnInvoice(invoice);
+  // Pending-payment invoices (PARTIALLY_PAID, UNPAID, EMI, LOAN) that are approved
+  // get a blue left-border — clearly distinct from the rose/burgundy of return invoices
+  const isPendingPayment = !isReturn
+    && ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"].includes(invoice.paymentStatus)
+    && invoice.status === "APPROVED";
+
+  const leftBorderColor = isReturn
+    ? "#8B3A3A"   // warm burgundy-rose for return invoices
+    : isPendingPayment
+    ? "#4A7CC7"   // cool blue for pending-payment invoices
+    : "transparent";
+
   return (
     <div
       style={{
-        position: "relative",
-        // Subtle left border tint for return invoices — just a visual signal
-        borderLeft: isReturn ? "3px solid #8B3A3A" : "none",
-        marginLeft: isReturn ? 0 : 0,
-        borderRadius: isReturn ? "0 0 0 0" : 0,
+        position:   "relative",
+        borderLeft: (isReturn || isPendingPayment) ? `3px solid ${leftBorderColor}` : "none",
       }}
     >
       {selectMode && (

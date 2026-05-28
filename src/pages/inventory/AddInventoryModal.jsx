@@ -1,24 +1,7 @@
+// SGA — Last updated: Added sellingPrice field in 2x2 grid layout (Qty | Purchase Price / Low Stock | Selling Price); stored to Firestore via addItem
 /**
  * AddInventoryModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add a brand-new inventory item.
- *
- * Rules enforced here:
- *  - Only rendered for owner / superadmin (parent also guards)
- *  - Date defaults to today; manual changes get amber highlight + M badge
- *  - Low stock threshold defaults to 5 but is editable per-item
- *  - On success → calls inventoryStore.addItem() → updates global state
- *
- * FIX (Phase 3 Flagged Issue #2): Category race condition.
- * The modal previously relied solely on the `categories` prop from the parent.
- * On slow connections, if fetchCategories() hadn't resolved before the user
- * clicked "Add Item", the category dropdown showed blank options.
- *
- * Fix: The modal now reads `categories`, `categoriesLoading`, and
- * `fetchCategories` directly from the Zustand store. On mount, if the
- * store's categories array is empty, it fetches them itself. The dropdown
- * shows a loading skeleton row while fetching, preventing confusion.
- * The `categories` prop is kept for backwards compatibility but is ignored
- * in favour of the store — a single source of truth.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -80,8 +63,6 @@ const inputStyle = (hasError = false, extraStyle = {}) => ({
 
 // ─── Main Component ────────────────────────────────────────────────────────
 
-// NOTE: `categories` prop is intentionally kept for API compatibility but the
-// modal now reads from the Zustand store directly to prevent race conditions.
 export default function AddInventoryModal({ categories: _propCategories, user, onClose, onSuccess }) {
   const { addItem, categories, categoriesLoading, fetchCategories } = useInventoryStore();
 
@@ -92,6 +73,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
     categoryId:            '',
     quantityAdded:         '',
     purchasePrice:         '',
+    sellingPrice:          '',   // NEW: selling price field
     dateOrderedOrReceived: today,
     vendorName:            '',
     lowStockThreshold:     '5',
@@ -105,21 +87,16 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
 
   const firstInputRef = useRef(null);
 
-  // Focus first field on mount
   useEffect(() => {
     firstInputRef.current?.focus();
   }, []);
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // FIX: If the store hasn't loaded categories yet (race condition on slow
-  // connections), fetch them now so the dropdown is populated before the user
-  // tries to pick one.
   useEffect(() => {
     if (categories.length === 0 && !categoriesLoading) {
       fetchCategories();
@@ -143,6 +120,8 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
       errs.quantityAdded = 'Enter a valid quantity (must be > 0)';
     if (!form.purchasePrice || isNaN(form.purchasePrice) || Number(form.purchasePrice) < 0)
       errs.purchasePrice = 'Enter a valid purchase price';
+    if (form.sellingPrice !== '' && (isNaN(form.sellingPrice) || Number(form.sellingPrice) < 0))
+      errs.sellingPrice = 'Enter a valid selling price (or leave blank)';
     if (!form.dateOrderedOrReceived)
       errs.dateOrderedOrReceived = 'Date is required';
     if (!form.lowStockThreshold || isNaN(form.lowStockThreshold) || Number(form.lowStockThreshold) < 0)
@@ -162,6 +141,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
           categoryId:            form.categoryId,
           quantityAdded:         Number(form.quantityAdded),
           purchasePrice:         Number(form.purchasePrice),
+          sellingPrice:          form.sellingPrice !== '' ? Number(form.sellingPrice) : null,
           dateOrderedOrReceived: form.dateOrderedOrReceived,
           vendorName:            form.vendorName.trim(),
           lowStockThreshold:     Number(form.lowStockThreshold),
@@ -261,7 +241,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             />
           </FormField>
 
-          {/* Category — FIX: reads from store with loading state */}
+          {/* Category */}
           <FormField
             label="Category"
             hint={
@@ -292,7 +272,6 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
                 ))}
               </select>
 
-              {/* Spinning loader icon inside the select while loading */}
               {categoriesLoading && (
                 <div style={{
                   position:       'absolute',
@@ -316,9 +295,10 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             </div>
           </FormField>
 
-          {/* Section: Stock Details */}
+          {/* ── Section: Stock Details — 2×2 grid ── */}
           <SectionHeading icon={<Hash size={14} />} label="Stock Details" />
 
+          {/* Row 1: Quantity Added (left) | Purchase Price (right) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormField label="Quantity Added" required error={errors.quantityAdded}>
               <input
@@ -354,24 +334,67 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             </FormField>
           </div>
 
-          <FormField
-            label="Low Stock Threshold"
-            required
-            error={errors.lowStockThreshold}
-            hint="You'll get an alert when stock falls to this level"
-          >
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={form.lowStockThreshold}
-              onChange={set('lowStockThreshold')}
-              placeholder="5"
-              style={inputStyle(!!errors.lowStockThreshold, { fontFamily: TYPOGRAPHY.mono })}
-              onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
-              onBlur={(e)  => (e.target.style.borderColor = errors.lowStockThreshold ? COLORS.statusRed : COLORS.tableHeader)}
-            />
-          </FormField>
+          {/* Row 2: Low Stock Threshold (left) | Selling Price (right) */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField
+              label="Low Stock Threshold"
+              required
+              error={errors.lowStockThreshold}
+              hint="Alert when stock falls to this level"
+            >
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.lowStockThreshold}
+                onChange={set('lowStockThreshold')}
+                placeholder="5"
+                style={inputStyle(!!errors.lowStockThreshold, { fontFamily: TYPOGRAPHY.mono })}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = errors.lowStockThreshold ? COLORS.statusRed : COLORS.tableHeader)}
+              />
+            </FormField>
+
+            <FormField
+              label="Selling Price / Unit (₹)"
+              error={errors.sellingPrice}
+              hint="Auto-filled in invoices — leave blank if not set"
+            >
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.sellingPrice}
+                onChange={set('sellingPrice')}
+                placeholder="0.00"
+                style={inputStyle(!!errors.sellingPrice, {
+                  fontFamily:  TYPOGRAPHY.mono,
+                  borderColor: COLORS.primary,
+                  background:  '#FDFAF8',
+                })}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = errors.sellingPrice ? COLORS.statusRed : COLORS.primary)}
+              />
+            </FormField>
+          </div>
+
+          {/* Selling price info tip */}
+          {form.sellingPrice !== '' && Number(form.sellingPrice) > 0 && (
+            <div style={{
+              background:   '#F0FBF0',
+              border:       '1px solid #A8D8A8',
+              borderRadius: RADII.md,
+              padding:      '8px 12px',
+              marginBottom: 12,
+              display:      'flex',
+              alignItems:   'center',
+              gap:          6,
+            }}>
+              <span style={{ fontSize: 13, color: '#1A7A1A' }}>
+                ✓ Selling price <strong>₹{Number(form.sellingPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> will be auto-used when this item is added to an invoice.
+              </span>
+            </div>
+          )}
 
           {/* Section: Date & Vendor */}
           <SectionHeading icon={<Calendar size={14} />} label="Receipt Details" />
