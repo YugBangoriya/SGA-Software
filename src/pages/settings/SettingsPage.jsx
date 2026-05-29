@@ -1,4 +1,4 @@
-// SGA — Last updated: Fixed 2 crash bugs — added missing HomeButton import + moved JSX out of module-level constant
+// SGA — Last updated: Bug Fix #2 — Added Inventory Categories section to Settings Business tab (InventoryCategoriesSettings component added to owner sections)
 // src/pages/settings/SettingsPage.jsx
 // Master Settings shell — role-based tab navigation, renders all settings panels.
 // SuperAdmin sees: SuperAdmin + Owner + User sections (god-mode).
@@ -45,6 +45,7 @@ import BusinessInfo from "./BusinessInfo";
 import { GSTSettings, LowStockDefault, TermsAndConditions } from "./GSTAndTerms";
 import DropdownManager from "./DropdownManager";
 import FollowUpTemplates from "./FollowUpTemplates";
+import InventoryCategoriesSettings from "./InventoryCategoriesSettings";
 
 // User components
 import { ThemeToggle, LanguageToggle, ChangePassword } from "./UserPreferences";
@@ -86,6 +87,7 @@ const ALL_TABS = [
       { id: "lowstock",  label: "Low Stock Default",          icon: "📦", Component: LowStockDefault },
       { id: "dropdowns", label: "Dropdown Values",            icon: "📝", Component: DropdownManager },
       { id: "templates", label: "Follow-Up Templates",        icon: "✉️", Component: FollowUpTemplates },
+      { id: "invCategories", label: "Inventory Categories",        icon: "🏷️", Component: InventoryCategoriesSettings },
       { id: "terms",     label: "Invoice Terms & Conditions", icon: "📄", Component: TermsAndConditions },
     ],
   },

@@ -1,4 +1,4 @@
-// SGA — Last updated: Fixed /inventory/:id route param — changed :id to :itemId so ItemDetailPage useParams() works
+// SGA — Last updated: Bug Fix #1 — Added /invoices/return/new route + CreateReturnInvoice import (was missing, causing Return button to redirect to Home)
 // src/App.jsx — FIXED: All modules wired to real components
 
 import { useEffect }           from "react";
@@ -30,6 +30,7 @@ import InvoiceList     from "@/pages/invoices/InvoiceList";
 import CreateInvoice   from "@/pages/invoices/CreateInvoice";
 import InvoiceDetail   from "@/pages/invoices/InvoiceDetail";
 import PendingPayments from "@/pages/invoices/PendingPayments";
+import CreateReturnInvoice from "@/pages/invoices/CreateReturnInvoice";
 
 // ── Phase 5: Quotations
 import QuotationsPage from "@/pages/quotations/QuotationsPage";
@@ -132,6 +133,11 @@ export default function App() {
           <Route path="/invoices" element={
             <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
               <InvoiceList />
+            </ProtectedRoute>
+          } />
+          <Route path="/invoices/return/new" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <CreateReturnInvoice />
             </ProtectedRoute>
           } />
           <Route path="/invoices/new" element={

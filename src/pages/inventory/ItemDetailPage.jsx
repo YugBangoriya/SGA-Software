@@ -1,4 +1,4 @@
-// SGA — Last updated: Fixed stuck-loading bug (itemLoading/itemError) + added Delete Item button for Owner+
+// SGA — Last updated: Bug Fix #3 — Added SellingPriceEditor to ItemDetailPage so Owner can edit selling price directly on the item detail page
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
@@ -30,7 +30,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, RefreshCw, Package, Calendar, Tag,
+  ArrowLeft, RefreshCw, Package, Calendar, Tag, IndianRupee,
   TruckIcon, AlertTriangle, Edit2, Check, X, History, Info, Trash2,
 } from 'lucide-react';
 
@@ -236,6 +236,139 @@ function ThresholdEditor({ itemId, currentThreshold, user, onSaved }) {
   );
 }
 
+
+// ─── Inline Selling Price Editor ──────────────────────────────────────────────
+
+function SellingPriceEditor({ itemId, currentSellingPrice, user, onSaved }) {
+  const { updateItem } = useInventoryStore();
+  const [editing, setEditing] = useState(false);
+  const [value,   setValue]   = useState(
+    currentSellingPrice != null && currentSellingPrice > 0
+      ? String(currentSellingPrice)
+      : ''
+  );
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
+
+  const handleSave = async () => {
+    const numVal = value.trim() === '' ? null : Number(value);
+    if (value.trim() !== '' && (isNaN(numVal) || numVal < 0)) {
+      setError('Must be a valid price (0 or more)');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      await updateItem(itemId, { sellingPrice: numVal }, user);
+      setEditing(false);
+      onSaved?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const displayValue = currentSellingPrice != null && currentSellingPrice > 0
+    ? formatCurrency(currentSellingPrice)
+    : 'Not set';
+
+  if (!editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          fontSize: 14, fontWeight: 600,
+          color: currentSellingPrice != null && currentSellingPrice > 0 ? COLORS.textPrimary : COLORS.textMuted,
+          fontFamily: TYPOGRAPHY.mono,
+        }}>
+          {displayValue}
+        </span>
+        {currentSellingPrice != null && currentSellingPrice > 0 && (
+          <span style={{
+            fontSize: 10, background: '#E8F5E9', color: '#1A7A1A',
+            padding: '2px 7px', borderRadius: RADII.full,
+            fontWeight: 700, fontFamily: TYPOGRAPHY.sans,
+          }}>
+            AUTO-FILL
+          </span>
+        )}
+        <button
+          onClick={() => {
+            setValue(currentSellingPrice != null && currentSellingPrice > 0 ? String(currentSellingPrice) : '');
+            setEditing(true);
+          }}
+          style={{
+            background: 'none', border: `1px solid ${COLORS.tableHeader}`,
+            borderRadius: RADII.sm, padding: '3px 7px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 4, color: COLORS.textSecondary,
+          }}
+        >
+          <Edit2 size={11} />
+          <span style={{ fontSize: 11, fontFamily: TYPOGRAPHY.sans }}>Edit</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+        <span style={{
+          padding: '5px 8px', background: COLORS.tableHeader,
+          border: `1.5px solid ${COLORS.primary}`, borderRight: 'none',
+          borderRadius: `${RADII.sm} 0 0 ${RADII.sm}`,
+          fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans,
+        }}>₹</span>
+        <input
+          type="number" min="0" step="0.01" value={value}
+          onChange={(e) => { setValue(e.target.value); setError(''); }}
+          placeholder="0.00"
+          autoFocus
+          style={{
+            width: 90, padding: '5px 8px',
+            border: `1.5px solid ${error ? COLORS.statusRed : COLORS.primary}`,
+            borderLeft: 'none',
+            borderRadius: `0 ${RADII.sm} ${RADII.sm} 0`,
+            fontSize: 13, fontFamily: TYPOGRAPHY.mono, outline: 'none',
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter')  handleSave();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+        />
+      </div>
+      <button
+        onClick={handleSave} disabled={loading}
+        style={{
+          background: COLORS.statusGreen, color: '#FFF', border: 'none',
+          borderRadius: RADII.sm, padding: '5px 8px',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center',
+        }}
+      >
+        {loading
+          ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'sgaSpin 0.7s linear infinite' }} />
+          : <Check size={13} />
+        }
+      </button>
+      <button
+        onClick={() => { setEditing(false); setError(''); }}
+        style={{
+          background: 'none', border: `1px solid ${COLORS.tableHeader}`,
+          borderRadius: RADII.sm, padding: '5px 8px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', color: COLORS.textSecondary,
+        }}
+      >
+        <X size={13} />
+      </button>
+      {error && <span style={{ fontSize: 11, color: COLORS.statusRed, fontFamily: TYPOGRAPHY.sans, width: '100%' }}>{error}</span>}
+      <span style={{ fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, width: '100%', marginTop: 2 }}>
+        Leave blank to allow manual price entry in invoices
+      </span>
+    </div>
+  );
+}
+
 // ─── Detail Row ───────────────────────────────────────────────────────────────
 
 function DetailRow({ label, icon, children }) {
@@ -373,6 +506,7 @@ export default function ItemDetailPage() {
     fetchCategories,
     getCategoryName,
     deleteItems,
+    updateItem,
   } = useInventoryStore();
 
   const [showReplenish,  setShowReplenish]  = useState(false);
@@ -663,6 +797,21 @@ export default function ItemDetailPage() {
                 </span>
               </DetailRow>
             )}
+
+            <DetailRow label="Selling Price / Unit" icon={<IndianRupee size={14} />}>
+              {isOwnerOrAdmin ? (
+                <SellingPriceEditor
+                  itemId={item.id}
+                  currentSellingPrice={item.sellingPrice}
+                  user={user}
+                  onSaved={() => fetchItem(item.id)}
+                />
+              ) : (
+                <span style={{ fontSize: 14, color: item.sellingPrice > 0 ? COLORS.textPrimary : COLORS.textMuted, fontFamily: TYPOGRAPHY.mono }}>
+                  {item.sellingPrice != null && item.sellingPrice > 0 ? formatCurrency(item.sellingPrice) : '—'}
+                </span>
+              )}
+            </DetailRow>
 
             <DetailRow label="Added By" icon={<Package size={14} />}>
               <span style={{ fontSize: 13, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>

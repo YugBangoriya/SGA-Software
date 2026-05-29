@@ -1,4 +1,4 @@
-// SGA — Last updated: Added restockHistory subcollection rule (Bug Fix — inventory item loading hang)
+// SGA — Last updated: Bug Fix #4 — invoiceDbLocked() now uses exists() guard before .data access; prevents NullPointerException when systemConfig/main doc is absent, which was denying Owner invoice reads and causing all dashboard stats to show 0
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
 // Version: 1.2 | Post-Launch Fix
 //
@@ -68,7 +68,14 @@ service cloud.firestore {
     }
 
     function invoiceDbLocked() {
-      return get(/databases/$(database)/documents/systemConfig/main).data.invoiceDbLocked == true;
+      // FIX: Use exists() guard before accessing .data.
+      // If systemConfig/main does not exist yet, get() returns null and
+      // null.data throws a NullPointerException in rule evaluation which
+      // DENIES the request. This caused Owner (not SuperAdmin — whose rule
+      // short-circuits) to be denied invoice reads entirely, which made ALL
+      // dashboard stats show 0 because the fetch aborted on the first query.
+      return exists(/databases/$(database)/documents/systemConfig/main) &&
+        get(/databases/$(database)/documents/systemConfig/main).data.invoiceDbLocked == true;
     }
 
     function isSelf(userId) {
