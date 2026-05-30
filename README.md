@@ -59,6 +59,9 @@ A three-platform unified inbox integrating WhatsApp Business, Instagram DMs, and
 ### ⏰ CNG Re-Testing Reminder System
 A Firebase Scheduled Cloud Function that runs daily, scans all customer records, and identifies anyone approaching their re-testing deadline. Escalating reminders are dispatched at defined milestones, up to and including the expiry date, with a message appropriate to the urgency at each stage. The system manages the full reminder lifecycle — from dispatch through to Owner notification, re-test date recording, and automatic scheduling of the next cycle. Each CNG cylinder has a 15-year lifespan, meaning up to five reminder cycles per customer.
 
+### 📊 Reporting & Analytics
+A full reporting suite: profit/loss analysis with line-item loss flagging and Recharts visualisations, an append-only audit trail with filter-by-user and filter-by-date, a pending receivables summary, a customer acquisition pipeline, and a follow-up performance tracker. The dashboard home surfaces live summary counts — pending invoices, low stock, upcoming reminders, pending follow-ups — with one-tap navigation into each.
+
 ### ⚙️ Settings & Administration
 A layered settings panel structured by role: SuperAdmin controls user management, invoice database lock and backup operations, custom fields, and system configuration; Owner controls all business-facing settings — branding, GST configuration, dropdown options, follow-up templates, and inventory categories; all users control personal preferences for theme and language.
 
