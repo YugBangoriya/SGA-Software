@@ -1,3 +1,4 @@
+// SGA — Last updated: Bug Fix — Added "Reports & Analytics" nav entry to getMoreMenuItemsForRole so the existing ProfitLossReport and ReportingHub pages become reachable from Sidebar and More menu
 // ─────────────────────────────────────────────────────────────────────────────
 // src/lib/rbac.js
 // Role-Based Access Control — Single source of truth.
@@ -13,6 +14,14 @@
 //   through the UI.
 //   Also added /reminders to ROUTE_ACCESS so the ProtectedRoute helper canAccessRoute()
 //   can resolve it correctly when called with a path.
+//
+// FIX (Reports Bug):
+//   Added "reports" entry to getMoreMenuItemsForRole() for superadmin + owner.
+//   ProfitLossReport.jsx, ReportingHub.jsx, and all sub-routes (/reports,
+//   /reports/profit-loss, etc.) already existed and were registered in App.jsx,
+//   but there was no navigation link pointing to /reports from either the
+//   Sidebar or the More page — making the entire Reports section unreachable
+//   from the UI. Also added /reports to ROUTE_ACCESS.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ROLES = {
@@ -161,8 +170,10 @@ export const ROUTE_ACCESS = {
   "/settings":   [ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE, ROLES.ACCOUNTANT],
   "/audit-log":  [ROLES.SUPERADMIN, ROLES.OWNER],
   "/admin":      [ROLES.SUPERADMIN],
-  // FIX: /reminders was missing from the route access table
+  // FIX (Phase 9): /reminders was missing from the route access table
   "/reminders":  [ROLES.SUPERADMIN, ROLES.OWNER],
+  // FIX (Reports Bug): /reports was missing — all sub-routes share the same access
+  "/reports":    [ROLES.SUPERADMIN, ROLES.OWNER],
 };
 
 // ── Helper: can role access route? ───────────────────────────────────────────
@@ -203,15 +214,22 @@ export function getMoreMenuItemsForRole(role) {
       roles: [ROLES.SUPERADMIN, ROLES.OWNER],
     },
     // ── FIX (Phase 9 Bug 1): Added missing Reminders nav entry ────────────────
-    // The /reminders route and ReminderLog.jsx component existed but were
-    // unreachable because no navigation item pointed to this route. SuperAdmin
-    // and Owner are the correct roles per PRD Section 2.1.
     {
       id: "reminders",  path: "/reminders",  label: "Reminders",
       icon: "reminders", description: "CNG re-test reminder log",
       roles: [ROLES.SUPERADMIN, ROLES.OWNER],
     },
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── FIX (Reports Bug): Added missing Reports & Analytics nav entry ─────────
+    // ProfitLossReport.jsx, ReportingHub.jsx, and all routes (/reports,
+    // /reports/profit-loss, /reports/pending-invoices, /reports/customers,
+    // /reports/follow-ups) already existed in App.jsx but were completely
+    // unreachable from the UI because no nav item in rbac.js pointed to /reports.
+    {
+      id: "reports",    path: "/reports",    label: "Reports",
+      icon: "BarChart2", description: "Profit/loss, analytics & insights",
+      roles: [ROLES.SUPERADMIN, ROLES.OWNER],
+    },
+    // ──────────────────────────────────────────────────────────────────────────
     {
       id: "car-repo",   path: "/car-repo",   label: "Car Repository",
       icon: "Car", description: "Models & media links",

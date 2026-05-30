@@ -1,21 +1,15 @@
+// SGA — Last updated: Added explicit rules for business/logo, invoices, quotations paths; fixed storage/unauthorized error on logo upload
+//
 // ─────────────────────────────────────────────────────────
-//  storage.rules  (COMPLETE FILE — merge with existing rules)
-//
+//  storage.rules — COMPLETE & AUTHORITATIVE FILE
 //  Shree Ganesh Automobile — Firebase Storage Security Rules
-//  Phase 7: Docs Repository additions
-//
-//  INSTRUCTIONS:
-//    Copy the new "match" block below into your existing
-//    storage.rules file inside:
-//      match /b/{bucket}/o { ... }
-//    Keep all existing Phase 1–6 rules intact.
 // ─────────────────────────────────────────────────────────
 
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // ─── Helper functions ────────────────────────────────
+    // ─── Helper functions ─────────────────────────────────
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -36,28 +30,92 @@ service firebase.storage {
       return isSuperAdmin() || isOwner();
     }
 
-    // ────────────────────────────────────────────────────
-    //  docsRepository/** storage path
+    function isEmployee() {
+      return isAuthenticated() && getRole() == 'employee';
+    }
+
+    function isAnyValidRole() {
+      return isOwnerOrSuperAdmin() || isEmployee();
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  business/logo — Business logo used in PDF headers
     //
-    //  READ:   SuperAdmin + Owner only
-    //          (employees cannot access the raw Storage URLs
-    //           through the app — but a possessor of a
-    //           Firebase Storage download URL can access it
-    //           directly; keep URLs private via Firestore rules)
-    //
+    //  READ:   All authenticated users
+    //          (logo appears in invoice/quotation PDFs for all)
     //  WRITE:  SuperAdmin + Owner only
     //  DELETE: SuperAdmin + Owner only
+    //  Max:    2 MB
+    //  Types:  PNG, JPG, SVG, WebP
+    // ─────────────────────────────────────────────────────
+    match /business/logo {
+      allow read:   if isAuthenticated();
+
+      allow write:  if isOwnerOrSuperAdmin()
+                    && request.resource.size <= 2097152   // 2 MB
+                    && request.resource.contentType.matches('image/.*');
+
+      allow delete: if isOwnerOrSuperAdmin();
+    }
+
+    // Also allow any path under /business/ for future assets (favicon, banner, etc.)
+    match /business/{allPaths=**} {
+      allow read:   if isAuthenticated();
+
+      allow write:  if isOwnerOrSuperAdmin()
+                    && request.resource.size <= 5242880   // 5 MB
+                    && request.resource.contentType.matches('image/.*');
+
+      allow delete: if isOwnerOrSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  invoices/** — Generated invoice PDFs
     //
-    //  Max file size: 50 MB (52,428,800 bytes)
-    //  Allowed content types: enforced here + in client validation
-    // ────────────────────────────────────────────────────
+    //  READ:   SuperAdmin + Owner + Employee
+    //  WRITE:  SuperAdmin + Owner (Cloud Functions also write here)
+    //  DELETE: SuperAdmin only (monthly backup workflow)
+    // ─────────────────────────────────────────────────────
+    match /invoices/{allPaths=**} {
+      allow read:   if isAnyValidRole();
+
+      allow write:  if isOwnerOrSuperAdmin()
+                    && request.resource.size <= 10485760  // 10 MB
+                    && request.resource.contentType.matches('application/pdf');
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  quotations/** — Generated quotation PDFs
+    //
+    //  READ:   SuperAdmin + Owner
+    //  WRITE:  SuperAdmin + Owner
+    //  DELETE: SuperAdmin + Owner
+    // ─────────────────────────────────────────────────────
+    match /quotations/{allPaths=**} {
+      allow read:   if isOwnerOrSuperAdmin();
+
+      allow write:  if isOwnerOrSuperAdmin()
+                    && request.resource.size <= 10485760  // 10 MB
+                    && request.resource.contentType.matches('application/pdf');
+
+      allow delete: if isOwnerOrSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  docsRepository/** — Price lists, banners, business cards
+    //
+    //  READ:   SuperAdmin + Owner only
+    //  WRITE:  SuperAdmin + Owner only
+    //  DELETE: SuperAdmin + Owner only
+    //  Max:    50 MB
+    // ─────────────────────────────────────────────────────
     match /docsRepository/{allPaths=**} {
       allow read:   if isOwnerOrSuperAdmin();
 
       allow write:  if isOwnerOrSuperAdmin()
-                    // Enforce max file size: 50 MB
-                    && request.resource.size <= 52428800
-                    // Enforce allowed content types
+                    && request.resource.size <= 52428800  // 50 MB
                     && (
                       request.resource.contentType.matches('application/pdf')
                       || request.resource.contentType.matches('image/.*')
@@ -76,15 +134,12 @@ service firebase.storage {
       allow delete: if isOwnerOrSuperAdmin();
     }
 
-    // ────────────────────────────────────────────────────
-    //  Existing storage paths from Phase 1–6
-    //  (invoices, quotation PDFs, business logo, etc.)
-    //  — keep these exactly as defined in prior phases —
-    // ────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
+    //  Deny everything else by default
+    // ─────────────────────────────────────────────────────
+    match /{everythingElse=**} {
+      allow read, write: if false;
+    }
 
-    // match /invoices/{allPaths=**} { ... }
-    // match /quotations/{allPaths=**} { ... }
-    // match /businessAssets/{allPaths=**} { ... }
-    // ... (Phase 1 rules unchanged)
   }
 }

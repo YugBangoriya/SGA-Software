@@ -1,3 +1,4 @@
+// SGA — Last updated: Bug Fix — Added BarChart2 icon for new "Reports" nav entry in rbac.js
 // src/lib/iconMap.js
 // ─────────────────────────────────────────────────────────────────────────────
 // Single source of truth for icon-id → Lucide component mapping.
@@ -13,6 +14,9 @@
 //
 // Convention: the key matches the `icon` value returned by rbac.js
 // (for More items: item.icon; for Sidebar items: ICON_MAP[item.id]).
+//
+// Reports Bug Fix: Added BarChart2 for the new "reports" nav entry.
+//   Keys added: "reports" (id-keyed for Sidebar), "BarChart2" (icon-keyed for More.jsx).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -28,6 +32,7 @@ import {
   Settings2,
   Settings,
   Bell,
+  BarChart2,
 } from "lucide-react";
 
 /**
@@ -46,6 +51,7 @@ const ICON_MAP = {
   messaging:      MessageSquare,
   quotations:     ClipboardList,
   reminders:      Bell,         // CNG re-test reminders (Phase 9 addition)
+  reports:        BarChart2,    // Reports & Analytics (Reports Bug Fix)
   "car-repo":     Car,
   "docs-repo":    FolderOpen,
   "audit-log":    ShieldCheck,
@@ -61,6 +67,7 @@ const ICON_MAP = {
   Settings2:      Settings2,
   Settings:       Settings,
   Bell:           Bell,
+  BarChart2:      BarChart2,    // alias for More.jsx icon-string lookup
 };
 
 export default ICON_MAP;
