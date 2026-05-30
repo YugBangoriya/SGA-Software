@@ -1,183 +1,154 @@
-# Shree Ganesh Automobile — Business Management Software
+<div align="center">
 
-A private, role-based, mobile-first Progressive Web Application (PWA) for
-managing CNG kit installation operations: customers, invoices, inventory,
-quotations, unified messaging, and automated reminders.
+# SGA Business Management Software
+
+### A fully deployed, role-controlled Progressive Web Application custom-built for an automotive CNG kit installation business
+
+**Live Deployment →** [sga-software.web.app](https://sga-software.web.app)
+
+</div>
+
+---
+
+## About Shree Ganesh Automobile
+
+Shree Ganesh Automobile is a direct-to-consumer automotive business specialising in CNG (Compressed Natural Gas) kit installation for private and commercial vehicles. Operating out of a physical workshop, the business handles everything from customer acquisition and vehicle consultations to CNG kit procurement, professional installation, and post-installation servicing — including mandatory government-mandated re-testing every three years.
+
+Before this software, the business was running entirely on a patchwork of disconnected tools: customer information spread across Excel files and WhatsApp conversations, invoices generated through legacy software with no connection to inventory, stock levels tracked informally with no alerts, and quotations sent as manually typed WhatsApp messages. Customer re-testing reminders — a regulatory requirement — were tracked manually or missed entirely. Every day of normal operations required navigating between four or five different tools, with no single source of truth for any part of the business.
+
+The business needed more than digitisation — it needed unification. A single system that understood the specific workflows of a CNG installation business and could replace the entire fragmented stack with something coherent, secure, and genuinely designed for the way the team actually works.
+
+---
+
+## What I Built & Why
+
+SGA Software is a role-controlled Progressive Web Application that consolidates the entirety of Shree Ganesh Automobile's daily operations into one platform. It is a private, internal tool — not a consumer product — built for a team of two to ten users with carefully defined access boundaries for each role.
+
+The brief was clear: the software needed to feel like it was made specifically for this business, not like a generic tool adapted to fit. That shaped every decision — the CNG-specific data fields in customer records, the automated re-testing reminder lifecycle that tracks each customer through a 15-year cylinder lifespan, the invoice approval workflow that reflects how the Owner and Employees actually collaborate, and the quotation system designed to reduce the friction between a sales conversation and a professionally delivered quote.
+
+The result is a fully deployed, actively used product that replaced four disconnected tools with one unified platform — and continues to be maintained and updated based on client feedback.
+
+---
+
+## Features Overview
+
+### 🔐 Authentication & Role-Based Access Control
+Three active user roles — SuperAdmin, Owner, and Employee — each with a carefully bounded permission set enforced at two independent layers: the React application routing layer and the Firestore database security rules layer. Role information is embedded in JWT tokens as server-set custom claims and evaluated at the database level, ensuring that no client-side manipulation can bypass data access controls. The Owner can remotely invalidate employee sessions; the SuperAdmin can remotely invalidate all sessions and block accounts entirely.
+
+### 🧑‍🤝‍🧑 Customer Records Management
+Comprehensive customer profiles capturing every CNG-relevant detail — vehicle registration, make and model, emission category, kit brand and specifications, installation date, and technician. A dynamic custom fields system allows the business to extend the customer data model at any time without any code changes. Real-time search and filter across the full customer list. Re-test date history tracked per customer with a visual reminder timeline.
+
+### 📦 Inventory Management
+Real-time stock tracking with three-tier colour-coded indicators (sufficient / low / critical), configurable per-item thresholds, and a complete restock history subcollection. A selling price field on each item auto-fills during invoice creation, removing the opportunity for inconsistent ad hoc pricing. The low-stock count surfaces directly on the dashboard for at-a-glance monitoring.
+
+### 🧾 Invoice Module
+A five-step creation wizard covering customer selection, item selection with auto-pricing, labour costs, discount and payment method, and a full review before submission. Invoices created by Employees enter a pending approval state with no inventory impact — inventory is deducted only when the Owner approves. The full lifecycle includes: return invoice processing with automatic inventory reinstatement, a pending payments dashboard, date override with visual flagging, and client-side PDF generation with full business branding. Invoice numbers follow a date-based format (`INV-DD-MM-YYYY-XXX`) for intuitive physical filing reference.
+
+### 📋 Quotation Generator
+Branded quotation PDFs built around a Car Repository of vehicle-specific media links. When a vehicle model is in the repository, its associated Google Drive images and Instagram installation reels are automatically pulled into the quotation document. Quotations are numbered, dated, stored permanently, and designed for direct WhatsApp delivery to the prospective customer.
+
+### 🚗 Car Repository
+A hierarchical database of Car Company → Car Model → Media Links, managed exclusively by SuperAdmin. Feeds directly into the quotation creation flow. When a new model is not yet in the repository, SuperAdmin receives an automatic notification to update it — ensuring the repository stays current.
+
+### 📁 Docs Repository
+Centralised file storage for business documents — price lists, banners, installation media — with category-based organisation, PDF and image preview, and a quick-send integration accessible directly from the Messaging chat view without navigating away.
+
+### 💬 Unified Messaging Module
+A three-platform unified inbox integrating WhatsApp Business, Instagram DMs, and Facebook Messenger into a single interface. Each conversation is tagged by platform. A private notes panel allows the Owner to maintain internal context per conversation — never transmitted to the customer. Follow-up scheduling, multi-language template management (English, Hindi, Gujarati), and a three-panel desktop layout are all fully built. Backend Cloud Functions and webhook handlers are deployed; live API activation is pending the client's decision to activate the paid messaging plans.
+
+### ⏰ CNG Re-Testing Reminder System
+A Firebase Scheduled Cloud Function that runs daily, scans all customer records, and identifies anyone approaching their re-testing deadline. Escalating reminders are dispatched at defined milestones, up to and including the expiry date, with a message appropriate to the urgency at each stage. The system manages the full reminder lifecycle — from dispatch through to Owner notification, re-test date recording, and automatic scheduling of the next cycle. Each CNG cylinder has a 15-year lifespan, meaning up to five reminder cycles per customer.
+
+### ⚙️ Settings & Administration
+A layered settings panel structured by role: SuperAdmin controls user management, invoice database lock and backup operations, custom fields, and system configuration; Owner controls all business-facing settings — branding, GST configuration, dropdown options, follow-up templates, and inventory categories; all users control personal preferences for theme and language.
+
+### 📱 Progressive Web App
+Installable via browser on Android and iOS with Add to Home Screen. Service worker caches the application shell for offline read access. Firebase Cloud Messaging delivers push notifications for key events. HTTPS enforced across all routes via the Firebase Hosting CDN.
 
 ---
 
 ## Tech Stack
 
-| Layer         | Technology                                     |
-| ------------- | ---------------------------------------------- |
-| Frontend      | React 18 + Vite + Tailwind CSS + Zustand       |
-| Backend       | Firebase (Firestore, Auth, Storage, Functions) |
-| Hosting       | Firebase Hosting (free tier)                   |
-| Messaging     | WhatsApp Business API + Meta Graph API (IG/FB) |
-| Notifications | Firebase Cloud Messaging (FCM)                 |
-| Translation   | Google Cloud Translation API                   |
+| Technology | Category | Version | Purpose |
+|---|---|---|---|
+| React | Frontend Framework | v19.2 | Component architecture; all UI |
+| Vite | Build Tool | v8.0 | Development server; production bundler |
+| Tailwind CSS | Styling | v3.4 | Utility-first styling with dark mode |
+| React Router DOM | Routing | v7.1 | Client-side routing; protected routes |
+| Zustand | State Management | v5.0 | Global application state |
+| React Hook Form + Zod | Forms & Validation | RHF v7.7 / Zod v4.3 | Type-safe form handling across all modules |
+| Firebase SDK | BaaS Platform | v12.1 | Auth, Firestore, Storage, Functions, Hosting, FCM |
+| Cloud Firestore | Database | v12 | Primary data store — 14 collections |
+| Firebase Cloud Functions | Serverless Backend | v2 (Node.js) | Business logic, scheduling, webhook processing |
+| @react-pdf/renderer | PDF Generation | v4.5 | Client-side invoice and quotation PDFs |
+| Recharts | Data Visualisation | v3.8 | Profit/Loss and reporting charts |
+| i18next + react-i18next | Internationalisation | v26 / v17 | English and Gujarati language support |
+| vite-plugin-pwa | PWA Tooling | v1.2 | Service worker generation; PWA manifest |
+| lucide-react | Icons | v1.11 | All iconography throughout the application |
+| Meta Cloud API (WhatsApp) | External API | — | Messaging infrastructure (pending activation) |
+| Meta Graph API (IG/FB) | External API | — | Unified inbox infrastructure (pending activation) |
+| AntiGravity | Development Environment | — | Primary IDE and AI-assisted development |
+| Firebase CLI | Deployment | Latest | Hosting, Functions, and Rules deployment |
 
 ---
 
-## Project Structure
+## Project Status
 
-```
-shree-ganesh-automobile/
-├── src/
-│   ├── components/        UI components (layout, invoices, shared ui)
-│   ├── pages/             One folder per module
-│   │   ├── customers/     Phase 2
-│   │   ├── inventory/     Phase 3
-│   │   ├── invoices/      Phase 4
-│   │   ├── quotations/    Phase 5
-│   │   ├── carRepository/ Phase 6
-│   │   ├── docsRepository/Phase 7
-│   │   ├── messaging/     Phase 8
-│   │   ├── reminders/     Phase 9
-│   │   ├── reporting/     Phase 10
-│   │   └── settings/      Phase 11
-│   ├── store/             Zustand state stores
-│   ├── lib/               Firebase services, API clients, helpers
-│   ├── hooks/             Custom React hooks
-│   ├── locales/           i18n (English + Gujarati)
-│   └── assets/            Logo and static assets
-├── functions/
-│   ├── src/
-│   │   ├── index.js       MERGED entry point (Phases 1+4+8+9+11)
-│   │   ├── invoiceApproval.js
-│   │   ├── whatsappInvoice.js
-│   │   ├── webhooks/      WhatsApp, Instagram, Facebook webhooks
-│   │   ├── schedulers/    Follow-up scheduler
-│   │   ├── helpers/       Meta sender, translation, message store
-│   │   ├── callables/     sendReplyMessage
-│   │   └── reminders/     CNG reminder scheduler
-│   └── package.json
-├── public/                PWA icons, manifest, service worker
-├── docs/                  Integration guides + user guides
-├── firestore.rules        Final consolidated security rules (Phase 12)
-├── firestore.indexes.json Merged indexes (Phases 1+2+9+10)
-├── storage.rules          Firebase Storage rules (Phase 7)
-├── firebase.json          Firebase project config
-└── .env.local.example     Environment variable template
-```
+| Attribute | Status |
+|---|---|
+| **Build Status** | ✅ Complete |
+| **Deployment** | ✅ Live at [sga-software.web.app](https://sga-software.web.app) |
+| **Client Delivery** | ✅ Delivered — actively used |
+| **Post-Deployment Maintenance** | ✅ Ongoing — features added based on client feedback |
+| **External API Activation** | 🔶 Pending client decision (WhatsApp, Instagram, Facebook) |
 
 ---
 
-## Quick Start
+## Portfolio Note
 
-### Prerequisites
+This is a privately deployed client application. Live login access is not available — the application uses role-based authentication with credentials managed exclusively for the client's internal team.
 
-- Node.js v20 LTS
-- Firebase CLI: `npm install -g firebase-tools`
-- Git
+The live URL ([sga-software.web.app](https://sga-software.web.app)) is included so you can see the login screen, branding, and application shell. All functional screens require an authenticated session.
 
-### 1. Install dependencies
-
-```bash
-npm install
-cd functions && npm install && cd ..
-```
-
-### 2. Configure environment
-
-Copy `.env.local.example` to `.env` and fill in your Firebase credentials:
-
-```bash
-cp .env.local.example .env
-```
-
-### 3. Link to Firebase project
-
-```bash
-firebase login
-firebase use --add   # select your Firebase project
-```
-
-### 4. Run locally
-
-```bash
-npm run dev
-# App opens at http://localhost:5173
-```
-
-### 5. Run with Firebase emulators
-
-```bash
-firebase emulators:start --only functions,firestore,auth
-```
-
-### 6. Deploy to production
-
-```bash
-npm run build
-firebase deploy
-```
+For a complete walkthrough of every screen, feature, design decision, technical architecture, and the full build process — including a screen-by-screen demo guide with screenshots — visit the **[GitHub Wiki](../../wiki)**.
 
 ---
 
-## Roles
+## About the Builder
 
-| Role       | Access Level                                             |
-| ---------- | -------------------------------------------------------- |
-| SuperAdmin | Full god-mode. User management, DB backup, system config |
-| Owner      | Full business access. Messaging, invoices, quotations    |
-| Employee   | Create pending invoices, view customers & inventory      |
-| Accountant | Placeholder — not implemented in v1                      |
+**Yug Bangoriya** is a Bachelor of Science student in Computer Science with a minor in Entrepreneurship. His approach to software development is rooted in systems architecture, product thinking, and AI-native execution — translating complex business requirements into functional software through the intersection of CS fundamentals and entrepreneurial reasoning.
 
----
+SGA Software was designed and shipped entirely through prompt engineering. Every module, every security decision, every database design choice, and every user-facing interaction was the product of deliberate systems thinking — knowing what to build, why to build it, and how the pieces connect — not line-by-line syntax authorship. The CS coursework that underpins the product — database design, cybersecurity, computer networks, human-computer interaction, software engineering — was applied directly and measurably to every architectural decision in the codebase.
 
-## Environment Variables
-
-See `.env.local.example` for the full list. Key variables:
-
-```
-VITE_FIREBASE_API_KEY
-VITE_FIREBASE_AUTH_DOMAIN
-VITE_FIREBASE_PROJECT_ID
-VITE_FIREBASE_STORAGE_BUCKET
-VITE_FIREBASE_MESSAGING_SENDER_ID
-VITE_FIREBASE_APP_ID
-VITE_FIREBASE_VAPID_KEY
-VITE_WHATSAPP_PHONE_NUMBER_ID
-VITE_WHATSAPP_WABA_ID
-VITE_GOOGLE_TRANSLATE_API_KEY
-```
-
-Cloud Function secrets are set via:
-
-```bash
-firebase functions:config:set whatsapp.access_token="..." meta.page_access_token="..."
-```
+This project represents a belief: that the ability to design, architect, and ship a product that solves a real business problem is the measure that matters. Not the tools or processes which were used to build it.
 
 ---
 
-## Modules (Build Order)
+## Explore the Full Documentation
 
-| Phase | Module                    | Status |
-| ----- | ------------------------- | ------ |
-| 1     | Project Setup & Auth      | ✅     |
-| 2     | Customer Records          | ✅     |
-| 3     | Inventory Management      | ✅     |
-| 4     | Invoice Module            | ✅     |
-| 5     | Quotation Module          | ✅     |
-| 6     | Car Repository            | ✅     |
-| 7     | Docs Repository           | ✅     |
-| 8     | Unified Messaging         | ✅     |
-| 9     | CNG Reminders             | ✅     |
-| 10    | Reporting & Audit         | ✅     |
-| 11    | Settings & Administration | ✅     |
-| 12    | PWA Optimization          | ✅     |
+The GitHub Wiki for this project is a multi-page technical and reflective documentation suite covering:
+
+- **1. Project Overview** — Business context, problem statement, feature map, and user personas
+- **2. Technical Architecture** — Stack deep-dive, system architecture, and data flow
+- **3. CS Concepts in Practice** — How database design, cybersecurity, networking, HCI, and software engineering principles are implemented in this codebase
+- **4. Feature Deep-Dive & Demo Guide** — Screen-by-screen walkthrough of every feature with screenshot guidance
+- **5. The Build Process Reflections** — A first-person account of building with AI, the new era of software development, and the CS + Entrepreneurship intersection
+- **6. Challenges & Problem Solving** — Specific bugs, root cause analyses, and what they taught me about building real systems
+- **7. Academic-to-Product Bridge** — A direct mapping of every relevant CS course to the features and decisions it produced in this project
+- **8. Project Retrospective** — What I would do differently, what I'm most proud of, and what this build revealed about how I think
+
+---
+<div align="center">
+  
+[![Status](https://img.shields.io/badge/Status-Deployed_%26_Active-success?style=flat-square)](https://sga-software.web.app)
+[![React](https://img.shields.io/badge/React-v19.2-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![Firebase](https://img.shields.io/badge/Firebase-v12-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com)
+[![Vite](https://img.shields.io/badge/Vite-v8.0-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
+[![PWA](https://img.shields.io/badge/PWA-Ready-5A0FC8?style=flat-square)](https://sga-software.web.app)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](#)
 
 ---
 
-## Docs
+*Built by Yug Bangoriya — 2026*
 
-See the `/docs` folder for:
-
-- `user-guides/` — Owner, Employee, SuperAdmin user guides + UAT checklist
-- `INTEGRATION_phase*.md` — Per-phase wiring notes
-
----
-
-> ⚠️ This is a **private business application** built for a real client.
-> Credentials and API keys are not included. See `.env.local.example` for setup.
+</div>
