@@ -133,11 +133,11 @@ The GitHub Wiki for this project is a multi-page technical and reflective docume
 
 - **1. Project Overview** — Business context, problem statement, feature map, and user personas
 - **2. Technical Architecture** — Stack deep-dive, system architecture, and data flow
-- **3. CS Concepts in Practice** — How database design, cybersecurity, networking, HCI, and software engineering principles are implemented in this codebase
+- **3. The Build — A Chronicle** — The story of the project from first client conversation to live product, told in chronological order
 - **4. Feature Deep-Dive & Demo Guide** — Screen-by-screen walkthrough of every feature with screenshot guidance
 - **5. The Build Process Reflections** — A first-person account of building with AI, the new era of software development, and the CS + Entrepreneurship intersection
 - **6. Challenges & Problem Solving** — Specific bugs, root cause analyses, and what they taught me about building real systems
-- **7. Academic-to-Product Bridge** — A direct mapping of every relevant CS course to the features and decisions it produced in this project
+- **7. Academic-to-Product Bridge** — Various courses mapped to the specific features and architectural decisions they produced, stated directly
 - **8. Project Retrospective** — What I would do differently, what I'm most proud of, and what this build revealed about how I think
 
 ---
