@@ -1,3 +1,4 @@
+// SGA — Last updated: All fields made optional — name, phone, vehicleNo are no longer required fields (client request)
 /**
  * CustomerForm.jsx
  * Multi-step form for creating and editing customer records.
@@ -85,13 +86,12 @@ const STEPS = [
 // ── Validation per step ────────────────────────────────────────────────────
 const validate = (step, data) => {
   const errs = {};
+  // All fields are optional — no required-field validation.
+  // Soft validation only: if a phone is entered, check format.
   if (step === 1) {
-    if (!data.name.trim()) errs.name = 'Full name is required';
-    if (!data.phone.trim()) errs.phone = 'Primary phone is required';
-    else if (!/^\+?[\d\s\-()]{7,15}$/.test(data.phone)) errs.phone = 'Invalid phone number';
-  }
-  if (step === 2) {
-    if (!data.vehicleNo.trim()) errs.vehicleNo = 'Vehicle registration number is required';
+    if (data.phone.trim() && !/^\+?[\d\s\-()]{7,15}$/.test(data.phone.trim())) {
+      errs.phone = 'Phone number format appears invalid';
+    }
   }
   return errs;
 };
@@ -393,7 +393,6 @@ function Step1({ data, set, errors, c }) {
       <SectionDivider title="Personal Information" />
       <Input
         label="Full Name"
-        required
         placeholder="e.g. Rahul Mehta"
         value={data.name}
         onChange={(e) => set('name', e.target.value)}
@@ -402,7 +401,6 @@ function Step1({ data, set, errors, c }) {
       />
       <Input
         label="Primary Phone"
-        required
         type="tel"
         placeholder="e.g. 98765 43210"
         value={data.phone}
@@ -431,7 +429,6 @@ function Step2({ data, set, errors, c }) {
       <SectionDivider title="Vehicle Information" />
       <Input
         label="Vehicle Registration Number"
-        required
         placeholder="e.g. GJ01AB1234"
         value={data.vehicleNo}
         onChange={(e) => set('vehicleNo', e.target.value.toUpperCase())}

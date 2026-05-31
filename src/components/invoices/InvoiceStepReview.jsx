@@ -1,14 +1,19 @@
-// SGA — Last updated: Added discount display in review; only shows Invoice Total if no discount, shows Invoice Total + Discount + Revised Total if discount exists
+// SGA — Last updated: Added inline-editable customer name/phone for Unnamed Customer (Cash Memo) invoices; accepts onChange prop
 // ============================================================
 // InvoiceStepReview.jsx — Step 5: Review & Submit
 // Phase 4 — Shree Ganesh Automobile
 // ============================================================
 
-import { User, Car, Package, Wrench, CreditCard, Calendar, CheckCircle } from "lucide-react";
+import { useState, useRef } from "react";
+import { User, Car, Package, Wrench, CreditCard, Calendar, CheckCircle, Pencil, Check, X, Receipt } from "lucide-react";
 import { formatCurrency, formatDate, PAYMENT_METHODS } from "../../lib/invoiceHelpers";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
 
-export default function InvoiceStepReview({ data, darkMode }) {
+// Default values for unnamed customer — must match InvoiceStepCustomer.jsx constants
+const UNNAMED_NAME_DEFAULT = "Cash Memo - Unnamed Customer";
+const UNNAMED_PHONE_DEFAULT = "XXXXX-XXXXX";
+
+export default function InvoiceStepReview({ data, onChange, darkMode }) {
   const isDark = darkMode;
   const border = isDark ? "#3A3A3A" : "#E8E2DF";
   const textPrimary = isDark ? "#E8E8E8" : "#222222";
@@ -31,7 +36,55 @@ export default function InvoiceStepReview({ data, darkMode }) {
     : "—";
 
   const hasDiscount = discountAmount > 0;
+  const isUnnamed = data.isUnnamed || false;
 
+  // ── Unnamed customer inline edit state ──────────────────
+  const [editingName, setEditingName] = useState(false);
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [nameVal, setNameVal] = useState(customer.name || UNNAMED_NAME_DEFAULT);
+  const [phoneVal, setPhoneVal] = useState(customer.phone || UNNAMED_PHONE_DEFAULT);
+  const nameInputRef = useRef(null);
+  const phoneInputRef = useRef(null);
+
+  const commitName = () => {
+    const trimmed = nameVal.trim() || UNNAMED_NAME_DEFAULT;
+    setNameVal(trimmed);
+    setEditingName(false);
+    if (onChange) {
+      onChange({
+        customerSnapshot: {
+          ...customer,
+          name: trimmed,
+        },
+      });
+    }
+  };
+
+  const commitPhone = () => {
+    const trimmed = phoneVal.trim() || UNNAMED_PHONE_DEFAULT;
+    setPhoneVal(trimmed);
+    setEditingPhone(false);
+    if (onChange) {
+      onChange({
+        customerSnapshot: {
+          ...customer,
+          phone: trimmed,
+        },
+      });
+    }
+  };
+
+  const startEditName = () => {
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  };
+
+  const startEditPhone = () => {
+    setEditingPhone(true);
+    setTimeout(() => phoneInputRef.current?.focus(), 50);
+  };
+
+  // ── Shared sub-components ────────────────────────────────
   const Section = ({ icon: Icon, title, children }) => (
     <div
       style={{
@@ -95,6 +148,94 @@ export default function InvoiceStepReview({ data, darkMode }) {
     </div>
   );
 
+  // ── Editable field row (for unnamed customer) ────────────
+  const EditableRow = ({ label, value, editing, onStartEdit, onCommit, inputRef, inputValue, onInputChange, onKeyDown }) => (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 6,
+        gap: 10,
+      }}
+    >
+      <span style={{ fontSize: 12, color: textSecondary, flexShrink: 0 }}>{label}</span>
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, justifyContent: "flex-end" }}>
+          <input
+            ref={inputRef}
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            onBlur={onCommit}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: textPrimary,
+              background: isDark ? "#2A2A2A" : "#FFFFFF",
+              border: `1.5px solid #4A6CF7`,
+              borderRadius: 6,
+              padding: "4px 8px",
+              outline: "none",
+              fontFamily: "inherit",
+              minWidth: 0,
+              flex: 1,
+              maxWidth: 200,
+              boxSizing: "border-box",
+            }}
+          />
+          <button
+            onClick={onCommit}
+            style={{
+              background: "#4A6CF7",
+              border: "none",
+              borderRadius: 5,
+              padding: "4px 7px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <Check size={12} color="#FFFFFF" />
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: value === UNNAMED_NAME_DEFAULT || value === UNNAMED_PHONE_DEFAULT
+                ? textSecondary
+                : textPrimary,
+              fontStyle: value === UNNAMED_NAME_DEFAULT || value === UNNAMED_PHONE_DEFAULT
+                ? "italic"
+                : "normal",
+            }}
+          >
+            {value}
+          </span>
+          <button
+            onClick={onStartEdit}
+            title="Edit"
+            style={{
+              background: "none",
+              border: `1px solid ${isDark ? "#555" : "#DDD"}`,
+              borderRadius: 5,
+              padding: "3px 6px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              color: "#4A6CF7",
+            }}
+          >
+            <Pencil size={11} color="#4A6CF7" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div>
       {/* Status notice */}
@@ -122,12 +263,61 @@ export default function InvoiceStepReview({ data, darkMode }) {
         </div>
       </div>
 
-      {/* Customer */}
-      <Section icon={User} title="Customer">
-        <Row label="Name" value={customer.name || "—"} bold />
-        <Row label="Phone" value={customer.phone || "—"} />
-        {customer.alternatePhone && <Row label="Alt. Phone" value={customer.alternatePhone} />}
-      </Section>
+      {/* Customer — Unnamed (editable) or Named */}
+      {isUnnamed ? (
+        <Section icon={Receipt} title="Customer (Cash Memo)">
+          {/* Hint banner */}
+          <div
+            style={{
+              background: isDark ? "rgba(74,108,247,0.12)" : "#EEF2FF",
+              border: `1px solid ${isDark ? "#3A4A8A" : "#C7D2FE"}`,
+              borderRadius: 7,
+              padding: "7px 10px",
+              marginBottom: 10,
+              fontSize: 11,
+              color: isDark ? "#8899FF" : "#4A6CF7",
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Optional:</strong> Edit the name or phone to create a customer record. Leave
+            as-is to keep this as an anonymous cash memo.
+          </div>
+          <EditableRow
+            label="Name"
+            value={nameVal}
+            editing={editingName}
+            onStartEdit={startEditName}
+            onCommit={commitName}
+            inputRef={nameInputRef}
+            inputValue={nameVal}
+            onInputChange={setNameVal}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitName();
+              if (e.key === "Escape") { setNameVal(customer.name || UNNAMED_NAME_DEFAULT); setEditingName(false); }
+            }}
+          />
+          <EditableRow
+            label="Phone"
+            value={phoneVal}
+            editing={editingPhone}
+            onStartEdit={startEditPhone}
+            onCommit={commitPhone}
+            inputRef={phoneInputRef}
+            inputValue={phoneVal}
+            onInputChange={setPhoneVal}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitPhone();
+              if (e.key === "Escape") { setPhoneVal(customer.phone || UNNAMED_PHONE_DEFAULT); setEditingPhone(false); }
+            }}
+          />
+        </Section>
+      ) : (
+        <Section icon={User} title="Customer">
+          <Row label="Name" value={customer.name || "—"} bold />
+          <Row label="Phone" value={customer.phone || "—"} />
+          {customer.alternatePhone && <Row label="Alt. Phone" value={customer.alternatePhone} />}
+        </Section>
+      )}
 
       {/* Vehicle */}
       <Section icon={Car} title="Vehicle">

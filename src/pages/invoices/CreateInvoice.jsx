@@ -1,4 +1,4 @@
-// SGA — Last updated: Added discountAmount and preDiscountTotal to DEFAULT_FORM for discount feature
+// SGA — Last updated: Added isUnnamed to DEFAULT_FORM; canAdvance allows unnamed customers at step 1; onChange passed to InvoiceStepReview; unnamed customer auto-creates record on submit if name/phone edited
 // ============================================================
 // CreateInvoice.jsx — 5-Step Invoice Creation Wizard
 // Phase 4 — Shree Ganesh Automobile
@@ -19,6 +19,11 @@ import InvoiceStepPayment from "../../components/invoices/InvoiceStepPayment";
 import InvoiceStepReview from "../../components/invoices/InvoiceStepReview";
 import DBLockedBanner from "../../components/invoices/DBLockedBanner";
 import { derivePaymentStatus } from "../../lib/invoiceHelpers";
+import { createCustomer } from "../../lib/customerService";
+
+// Default placeholder values — must match InvoiceStepCustomer.jsx + InvoiceStepReview.jsx
+const UNNAMED_NAME_DEFAULT = "Cash Memo - Unnamed Customer";
+const UNNAMED_PHONE_DEFAULT = "XXXXX-XXXXX";
 
 const STEPS = [
   { id: 1, label: "Customer", icon: User, description: "Select customer" },
@@ -32,6 +37,7 @@ const DEFAULT_FORM = {
   customerId: null,
   customerSnapshot: null,
   vehicleSnapshot: null,
+  isUnnamed: false,
   items: [],
   labourCost: "",
   invoiceDate: new Date().toISOString().split("T")[0],
@@ -91,7 +97,10 @@ export default function CreateInvoice() {
 
   // ── Step validation ──────────────────────────────────────
   const canAdvance = () => {
-    if (step === 1) return !!form.customerId;
+    if (step === 1) {
+      // Allow advance if a named customer is selected OR unnamed option was chosen
+      return !!form.customerId || !!form.isUnnamed;
+    }
     if (step === 2) return form.items.length > 0;
     if (step === 3) return true; // Labour is optional
     if (step === 4) {
@@ -113,6 +122,8 @@ export default function CreateInvoice() {
   };
 
   // ── Submit ───────────────────────────────────────────────
+  // If isUnnamed and the customer name or phone was edited away from the
+  // defaults, auto-create a customer record and link it to this invoice.
   const handleSubmit = async () => {
     if (!currentUser) {
       setSubmitError("Authentication error. Please log out and log in again.");
@@ -120,8 +131,48 @@ export default function CreateInvoice() {
     }
     setSubmitting(true);
     setSubmitError(null);
+
     try {
-      const invoiceId = await createInvoice(form, currentUser);
+      let finalForm = { ...form };
+
+      // ── Unnamed customer: check if name/phone was changed ──
+      if (form.isUnnamed) {
+        const snap = form.customerSnapshot || {};
+        const nameChanged = snap.name && snap.name !== UNNAMED_NAME_DEFAULT;
+        const phoneChanged = snap.phone && snap.phone !== UNNAMED_PHONE_DEFAULT;
+
+        if (nameChanged || phoneChanged) {
+          // Create a minimal customer record from the entered details
+          const newCustomerId = await createCustomer({
+            name: nameChanged ? snap.name : "",
+            phone: phoneChanged ? snap.phone : "",
+            altPhone: "",
+            vehicleNo: form.vehicleSnapshot?.registrationNo || "",
+            vehicleMake: form.vehicleSnapshot?.make || "",
+            vehicleModel: form.vehicleSnapshot?.model || "",
+            vehicleYear: form.vehicleSnapshot?.year || "",
+            emissionCategory: form.vehicleSnapshot?.emissionCategory || "",
+            cngKitBrand: "",
+            cngKitModel: "",
+            tankCapacity: "",
+            advancers: [],
+            addOns: [],
+            installationDate: "",
+            technicianName: "",
+            notes: "Created automatically from unnamed invoice.",
+            customFields: {},
+            createdBy: currentUser.uid,
+          });
+          // Link the newly created customer
+          finalForm = {
+            ...finalForm,
+            customerId: newCustomerId,
+            isUnnamed: false,
+          };
+        }
+      }
+
+      const invoiceId = await createInvoice(finalForm, currentUser);
       navigate(`/invoices/${invoiceId}?created=true`);
     } catch (err) {
       setSubmitError(err.message);
@@ -148,7 +199,8 @@ export default function CreateInvoice() {
           />
         );
       case 5:
-        return <InvoiceStepReview data={form} darkMode={isDark} />;
+        // Pass onChange so the review step can propagate unnamed customer edits back up
+        return <InvoiceStepReview data={form} onChange={updateForm} darkMode={isDark} />;
       default:
         return null;
     }

@@ -1,3 +1,4 @@
+// SGA — Last updated: Added "Unnamed Customer / Cash Memo" option alongside Create New Customer
 // ============================================================
 // InvoiceStepCustomer.jsx — Step 1: Customer Selector
 // Phase 4 — Shree Ganesh Automobile
@@ -7,7 +8,13 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, User, Car, ChevronRight, X, Phone, UserPlus } from "lucide-react";
+import { Search, User, Car, ChevronRight, X, Phone, UserPlus, Receipt } from "lucide-react";
+
+// Default placeholder values for unnamed customer
+const UNNAMED_DEFAULTS = {
+  name: "Cash Memo - Unnamed Customer",
+  phone: "XXXXX-XXXXX",
+};
 
 export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
   const navigate = useNavigate();
@@ -15,6 +22,7 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const selected = data.customerId || null;
+  const isUnnamed = data.isUnnamed || false;
 
   const isDark = darkMode;
   const bg = isDark ? "#2A2A2A" : "#FFFFFF";
@@ -52,6 +60,7 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
 
   const selectCustomer = (customer) => {
     onChange({
+      isUnnamed: false,
       customerId: customer.id,
       customerSnapshot: {
         name: customer.name,
@@ -68,13 +77,118 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
     });
   };
 
+  // ── Unnamed / Cash Memo selection ──────────────────────
+  const selectUnnamed = () => {
+    onChange({
+      isUnnamed: true,
+      customerId: null,
+      customerSnapshot: {
+        name: UNNAMED_DEFAULTS.name,
+        phone: UNNAMED_DEFAULTS.phone,
+        alternatePhone: "",
+      },
+      vehicleSnapshot: {
+        registrationNo: "",
+        make: "",
+        model: "",
+        year: "",
+        emissionCategory: "",
+      },
+    });
+  };
+
   const clearSelection = () => {
-    onChange({ customerId: null, customerSnapshot: null, vehicleSnapshot: null });
+    onChange({
+      isUnnamed: false,
+      customerId: null,
+      customerSnapshot: null,
+      vehicleSnapshot: null,
+    });
   };
 
   const selectedCustomer = customers.find((c) => c.id === selected);
 
-  // ── Selected state ─────────────────────────────────────
+  // ── Unnamed Customer selected state ───────────────────
+  if (isUnnamed) {
+    return (
+      <div>
+        <div
+          style={{
+            background: isDark ? "#1E1E2A" : "#F0F4FF",
+            border: "2px solid #4A6CF7",
+            borderRadius: 12,
+            padding: "16px 18px",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  background: isDark ? "#2A2A4A" : "#DDE3FF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Receipt size={18} color="#4A6CF7" />
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: textPrimary }}>
+                  Cash Memo (Unnamed Customer)
+                </div>
+                <div style={{ fontSize: 12, color: "#4A6CF7", fontWeight: 500, marginTop: 2 }}>
+                  Name &amp; phone can be updated in the Review step
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={clearSelection}
+              style={{
+                background: "none",
+                border: `1px solid ${border}`,
+                borderRadius: 6,
+                padding: "5px 10px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 12,
+                color: textSecondary,
+                fontFamily: "inherit",
+              }}
+            >
+              <X size={12} /> Change
+            </button>
+          </div>
+          <div
+            style={{
+              background: isDark ? "rgba(74,108,247,0.1)" : "rgba(74,108,247,0.08)",
+              borderRadius: 8,
+              padding: "8px 12px",
+              fontSize: 12,
+              color: isDark ? "#8899FF" : "#3A5CD0",
+              lineHeight: 1.5,
+            }}
+          >
+            💡 Invoice will be created as <strong>Cash Memo</strong>. You may optionally fill in the
+            customer name and phone number on the Review step — if entered, the customer will be added
+            to your records.
+          </div>
+        </div>
+
+        <p style={{ fontSize: 13, color: "#4A6CF7", fontWeight: 600, textAlign: "center" }}>
+          ✓ Unnamed customer selected — click Next to continue
+        </p>
+      </div>
+    );
+  }
+
+  // ── Existing customer selected state ──────────────────
   if (selectedCustomer) {
     return (
       <div>
@@ -125,6 +239,7 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
                 gap: 4,
                 fontSize: 12,
                 color: "#666",
+                fontFamily: "inherit",
               }}
             >
               <X size={12} /> Change
@@ -228,7 +343,7 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
       </div>
 
       {/* Results */}
-      <div style={{ maxHeight: 380, overflowY: "auto" }}>
+      <div style={{ maxHeight: 300, overflowY: "auto" }}>
         {loading ? (
           <div style={{ textAlign: "center", padding: "30px 0", color: textSecondary }}>
             Loading customers...
@@ -322,27 +437,78 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
         )}
       </div>
 
-      {/* Always-visible Create New Customer link */}
-      {!loading && filtered.length > 0 && (
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${border}`, textAlign: "center" }}>
+      {/* Bottom action buttons: Create New Customer + Unnamed Customer */}
+      {!loading && (
+        <div
+          style={{
+            marginTop: 14,
+            paddingTop: 12,
+            borderTop: `1px solid ${border}`,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Create New Customer */}
           <button
             onClick={() => navigate("/customers/new")}
             style={{
+              flex: 1,
+              minWidth: 140,
               background: "none",
               border: `1.5px solid #661F1F`,
               borderRadius: 8,
-              padding: "9px 18px",
+              padding: "10px 12px",
               fontWeight: 700,
               fontSize: 13,
               color: "#661F1F",
               cursor: "pointer",
               display: "inline-flex",
               alignItems: "center",
+              justifyContent: "center",
               gap: 6,
               fontFamily: "inherit",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#FDF8F8";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "none";
             }}
           >
             <UserPlus size={14} /> Create New Customer
+          </button>
+
+          {/* Unnamed / Cash Memo */}
+          <button
+            onClick={selectUnnamed}
+            style={{
+              flex: 1,
+              minWidth: 140,
+              background: "none",
+              border: `1.5px solid #4A6CF7`,
+              borderRadius: 8,
+              padding: "10px 12px",
+              fontWeight: 700,
+              fontSize: 13,
+              color: "#4A6CF7",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              fontFamily: "inherit",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = isDark ? "#1A1A2A" : "#F0F4FF";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "none";
+            }}
+          >
+            <Receipt size={14} /> Unnamed Customer
           </button>
         </div>
       )}

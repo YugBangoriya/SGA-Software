@@ -1,4 +1,4 @@
-// SGA — Last updated: Selling price now auto-filled from inventory sellingPrice field; price field is READ-ONLY in invoice (no manual edits allowed); picker shows selling price instead of purchase price
+// SGA — Last updated: Price fallback changed from purchasePrice → 0 when no selling price is set; price field is now EDITABLE per-line-item during invoice creation; allows override of selling price
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import {
-  Plus, Minus, Trash2, Search, Package, AlertTriangle, X, Lock,
+  Plus, Minus, Trash2, Search, Package, AlertTriangle, X, Pencil, Check,
 } from "lucide-react";
 import { formatCurrency } from "../../lib/invoiceHelpers";
 
@@ -17,6 +17,10 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showPicker, setShowPicker] = useState(false);
+  // Track which item's price is being edited: inventoryItemId → true/false
+  const [editingPriceId, setEditingPriceId] = useState(null);
+  // Local draft price while editing
+  const [priceDraft, setPriceDraft] = useState("");
 
   const items = data.items || [];
   const isDark = darkMode;
@@ -50,19 +54,23 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
     );
   });
 
-  // ── Determine the effective selling price for an inventory item ──────
-  // Priority: sellingPrice field (set in inventory) → fallback to purchasePrice
+  // ── Effective price for an inventory item ─────────────────
+  // Priority: sellingPrice (if set and > 0) → 0 (NOT purchase price)
+  // Per client request: if selling price is not configured, default to 0
+  // so the user is forced/prompted to set a price manually.
   const getEffectivePrice = (invItem) => {
     if (invItem.sellingPrice != null && invItem.sellingPrice > 0) {
       return invItem.sellingPrice;
     }
-    return invItem.purchasePrice || 0;
+    return 0;
   };
 
   const addItem = (invItem) => {
     const existing = items.find((i) => i.inventoryItemId === invItem.id);
     if (existing) {
       updateQty(invItem.id, existing.quantity + 1);
+      setShowPicker(false);
+      setSearch("");
       return;
     }
     const effectivePrice = getEffectivePrice(invItem);
@@ -78,10 +86,10 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
           purchasePrice:    invItem.purchasePrice || 0,
           availableQty:     invItem.quantity || 0,
           // Flag whether the price came from the inventory's selling price field
-          // or fell back to purchase price — used to display a tooltip
+          // or was defaulted to 0 (no selling price configured)
           priceSource:      (invItem.sellingPrice != null && invItem.sellingPrice > 0)
                               ? "inventory_selling"
-                              : "purchase_fallback",
+                              : "not_set",
         },
       ],
     });
@@ -91,6 +99,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
 
   const removeItem = (inventoryItemId) => {
     onChange({ items: items.filter((i) => i.inventoryItemId !== inventoryItemId) });
+    if (editingPriceId === inventoryItemId) setEditingPriceId(null);
   };
 
   const updateQty = (inventoryItemId, qty) => {
@@ -102,10 +111,33 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
     });
   };
 
-  // NOTE: updatePrice is intentionally removed — prices are locked to inventory values.
+  // ── Price editing ─────────────────────────────────────────
+  const startEditPrice = (item) => {
+    setEditingPriceId(item.inventoryItemId);
+    setPriceDraft(item.sellingPrice != null ? String(item.sellingPrice) : "0");
+  };
+
+  const commitPrice = (inventoryItemId) => {
+    const parsed = parseFloat(priceDraft);
+    const newPrice = isNaN(parsed) || parsed < 0 ? 0 : parseFloat(parsed.toFixed(2));
+    onChange({
+      items: items.map((i) =>
+        i.inventoryItemId === inventoryItemId
+          ? { ...i, sellingPrice: newPrice, priceSource: "manual_override" }
+          : i
+      ),
+    });
+    setEditingPriceId(null);
+    setPriceDraft("");
+  };
+
+  const cancelEditPrice = () => {
+    setEditingPriceId(null);
+    setPriceDraft("");
+  };
 
   const itemsTotal = items.reduce(
-    (s, i) => s + i.sellingPrice * i.quantity, 0
+    (s, i) => s + (i.sellingPrice || 0) * i.quantity, 0
   );
 
   return (
@@ -115,13 +147,15 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
         <div style={{ marginBottom: 16 }}>
           {items.map((item) => {
             const isOverQty = item.quantity > item.availableQty;
-            const isFallback = item.priceSource === "purchase_fallback";
+            const isPriceNotSet = item.priceSource === "not_set" || item.sellingPrice === 0;
+            const isManual = item.priceSource === "manual_override";
+            const isEditing = editingPriceId === item.inventoryItemId;
             return (
               <div
                 key={item.inventoryItemId}
                 style={{
                   background: isDark ? "#2A2A2A" : "#FFFFFF",
-                  border: `1.5px solid ${isOverQty ? "#CC0000" : border}`,
+                  border: `1.5px solid ${isOverQty ? "#CC0000" : isPriceNotSet ? "#F5A030" : border}`,
                   borderRadius: 10,
                   padding: "12px 14px",
                   marginBottom: 10,
@@ -147,7 +181,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                   </button>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
                   {/* Qty stepper */}
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <button
@@ -187,32 +221,103 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                     </button>
                   </div>
 
-                  {/* Price — READ-ONLY, locked from inventory */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 4, flex: 1,
-                    background: isDark ? "#222" : "#F9F6F4",
-                    borderRadius: 6, padding: "5px 10px",
-                    border: `1.5px solid ${isDark ? "#3A3A3A" : "#E0D8D4"}`,
-                    opacity: 0.9,
-                  }}>
-                    <Lock size={11} color={isDark ? "#666" : "#AAAAAA"} />
-                    <span style={{ fontSize: 12, color: textSecondary, marginLeft: 2 }}>₹</span>
-                    <span style={{
-                      fontSize: 14, fontWeight: 600, color: textPrimary,
-                      fontFamily: "'Courier New', monospace", flex: 1,
+                  {/* Price — EDITABLE ──────────────────────────────────── */}
+                  {isEditing ? (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 4, flex: 1,
                     }}>
-                      {item.sellingPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                    </span>
-                    {isFallback && (
+                      <span style={{ fontSize: 13, color: textSecondary }}>₹</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={priceDraft}
+                        autoFocus
+                        onChange={(e) => setPriceDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitPrice(item.inventoryItemId);
+                          if (e.key === "Escape") cancelEditPrice();
+                        }}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          padding: "5px 8px",
+                          border: `1.5px solid #661F1F`,
+                          borderRadius: 6,
+                          background: isDark ? "#2A2A2A" : "#FFFFFF",
+                          color: textPrimary,
+                          fontSize: 13,
+                          fontFamily: "'Courier New', monospace",
+                          outline: "none",
+                          maxWidth: 110,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      {/* Confirm */}
+                      <button
+                        onClick={() => commitPrice(item.inventoryItemId)}
+                        style={{
+                          background: "#1A7A1A", border: "none", borderRadius: 5,
+                          padding: "5px 8px", cursor: "pointer",
+                          display: "flex", alignItems: "center",
+                        }}
+                      >
+                        <Check size={12} color="#FFFFFF" />
+                      </button>
+                      {/* Cancel */}
+                      <button
+                        onClick={cancelEditPrice}
+                        style={{
+                          background: isDark ? "#444" : "#E8E2DF", border: "none", borderRadius: 5,
+                          padding: "5px 7px", cursor: "pointer",
+                          display: "flex", alignItems: "center",
+                        }}
+                      >
+                        <X size={12} color={textSecondary} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 5, flex: 1,
+                      background: isDark ? "#222" : "#F9F6F4",
+                      borderRadius: 6, padding: "5px 10px",
+                      border: `1.5px solid ${isPriceNotSet ? "#F5A030" : (isDark ? "#3A3A3A" : "#E0D8D4")}`,
+                      cursor: "pointer",
+                      minWidth: 0,
+                    }}
+                    onClick={() => startEditPrice(item)}
+                    title="Click to edit price"
+                    >
+                      <span style={{ fontSize: 12, color: textSecondary }}>₹</span>
                       <span style={{
-                        fontSize: 9, background: "#FFF3E0", color: "#CC6600",
-                        borderRadius: 4, padding: "1px 5px", fontWeight: 700,
-                        whiteSpace: "nowrap",
+                        fontSize: 14, fontWeight: 600, color: isPriceNotSet ? "#CC6600" : textPrimary,
+                        fontFamily: "'Courier New', monospace", flex: 1,
                       }}>
-                        COST
+                        {(item.sellingPrice || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                       </span>
-                    )}
-                  </div>
+                      {/* Source badge */}
+                      <span style={{
+                        fontSize: 9,
+                        background: isManual
+                          ? "#EBF5FB"
+                          : isPriceNotSet
+                            ? "#FFF3E0"
+                            : "#E8F5E9",
+                        color: isManual
+                          ? "#0055CC"
+                          : isPriceNotSet
+                            ? "#CC6600"
+                            : "#1A7A1A",
+                        borderRadius: 3, padding: "1px 5px",
+                        fontWeight: 700, display: "inline-block",
+                        whiteSpace: "nowrap",
+                        marginRight: 2,
+                      }}>
+                        {isManual ? "EDITED" : isPriceNotSet ? "SET PRICE" : "SELL"}
+                      </span>
+                      <Pencil size={10} color={textSecondary} style={{ flexShrink: 0 }} />
+                    </div>
+                  )}
 
                   {/* Line total */}
                   <div
@@ -222,12 +327,12 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                       fontFamily: "'Courier New', monospace",
                     }}
                   >
-                    {formatCurrency(item.sellingPrice * item.quantity)}
+                    {formatCurrency((item.sellingPrice || 0) * item.quantity)}
                   </div>
                 </div>
 
-                {/* Fallback warning — shown when no selling price was set in inventory */}
-                {isFallback && (
+                {/* Warning when price is 0 / not configured */}
+                {isPriceNotSet && !isEditing && (
                   <div style={{
                     marginTop: 7,
                     padding: "5px 8px",
@@ -237,7 +342,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                   }}>
                     <AlertTriangle size={11} color="#CC6600" />
                     <span style={{ fontSize: 11, color: "#CC6600" }}>
-                      No selling price set in inventory — using purchase price. Set a selling price in Inventory to fix this.
+                      No selling price set in inventory — price is ₹0. Click the price field above to set it.
                     </span>
                   </div>
                 )}
@@ -325,7 +430,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
 
               {/* Price source legend */}
               <div style={{
-                display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap",
+                display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap",
               }}>
                 <span style={{
                   fontSize: 10, background: "#E8F5E9", color: "#1A7A1A",
@@ -337,7 +442,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                   fontSize: 10, background: "#FFF3E0", color: "#CC6600",
                   borderRadius: 4, padding: "2px 7px", fontWeight: 600,
                 }}>
-                  COST = Using purchase price
+                  ₹0 = No selling price — you can set it after adding
                 </span>
               </div>
 
@@ -412,8 +517,12 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                         </div>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#661F1F", fontFamily: "'Courier New', monospace" }}>
-                          {formatCurrency(effectivePrice)}
+                        <div style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: hasSellingPrice ? "#661F1F" : "#CC6600",
+                          fontFamily: "'Courier New', monospace",
+                        }}>
+                          {hasSellingPrice ? formatCurrency(effectivePrice) : "₹0.00"}
                         </div>
                         <div style={{
                           fontSize: 9,
@@ -422,7 +531,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                           borderRadius: 3, padding: "1px 5px",
                           fontWeight: 700, display: "inline-block", marginTop: 2,
                         }}>
-                          {hasSellingPrice ? "SELL" : "COST"}
+                          {hasSellingPrice ? "SELL" : "₹0"}
                         </div>
                       </div>
                     </div>
