@@ -1,13 +1,7 @@
-// SGA — Last updated: Added deleteItem action + fixed fetchItem error state (no more stuck loading)
+// SGA — Last updated: Added toggleTrackingMode action (isUntracked toggle); fetchItems lowStock filter excludes untracked items; added updateLocalPurchasePrice action
 /**
  * Inventory Store — Shree Ganesh Automobile
  * Zustand global state for the Inventory module.
- *
- * FIX: fetchItem now tracks a separate `itemError` field.
- * Previously if getInventoryItem() threw, `loading` became false but
- * `selectedItem` stayed null — causing ItemDetailPage to show "Loading item..."
- * forever (the condition was `loading || !selectedItem`).
- * Now the detail page can distinguish "still loading" from "load failed".
  */
 
 import { create } from 'zustand';
@@ -21,6 +15,8 @@ import {
   replenishInventoryItem,
   updateInventoryItem,
   updateLowStockThreshold,
+  updateTrackingMode,
+  updateLocalItemPurchasePrice,
   addCategory,
   updateCategory,
   deleteCategory,
@@ -35,9 +31,9 @@ const useInventoryStore = create((set, get) => ({
   selectedItem:    null,
   restockHistory:  [],
 
-  loading:           false,   // list-level loading
-  itemLoading:       false,   // item detail loading (separate from list)
-  itemError:         null,    // item detail fetch error (null = no error)
+  loading:           false,
+  itemLoading:       false,
+  itemError:         null,
   historyLoading:    false,
   categoriesLoading: false,
   error:             null,
@@ -48,8 +44,11 @@ const useInventoryStore = create((set, get) => ({
     set({ loading: true, error: null });
     try {
       const items = await getInventoryItems();
+      // Low-stock filter: exclude untracked items (they have no ceiling)
       const lowStockItems = items.filter(
-        (item) => item.quantity <= (item.lowStockThreshold ?? 5)
+        (item) =>
+          item.isUntracked !== true &&
+          (item.quantity ?? 0) <= (item.lowStockThreshold ?? 5)
       );
       set({ items, lowStockItems, loading: false });
     } catch (err) {
@@ -57,9 +56,6 @@ const useInventoryStore = create((set, get) => ({
     }
   },
 
-  // FIX: uses `itemLoading` + `itemError` instead of shared `loading`.
-  // ItemDetailPage checks `itemLoading || (!selectedItem && !itemError)`
-  // so a fetch failure no longer leaves the page stuck on the spinner.
   fetchItem: async (itemId) => {
     set({ itemLoading: true, itemError: null, selectedItem: null });
     try {
@@ -134,18 +130,35 @@ const useInventoryStore = create((set, get) => ({
   },
 
   /**
-   * Delete one or more inventory items.
-   * Removes them optimistically from the local items list immediately.
-   * @param {string[]} ids  — Firestore document IDs to delete
-   * @param {object}   user — Firebase Auth user object (for audit log)
+   * Toggle tracking mode for an item (tracked ↔ untracked).
+   * toUntracked=true  → removes quantity field, sets isUntracked=true
+   * toUntracked=false → sets isUntracked=false, seeds quantity with startingQty
    */
+  toggleTrackingMode: async (itemId, toUntracked, startingQty = 0, user) => {
+    await updateTrackingMode({ itemId, toUntracked, startingQty, user });
+    await get().fetchItems();
+    if (get().selectedItem?.id === itemId) {
+      await get().fetchItem(itemId);
+    }
+  },
+
+  /**
+   * Set purchase price on a Local Item (auto-created from invoice approval).
+   * Enables profit/loss calculations for that item going forward.
+   */
+  updateLocalPurchasePrice: async (itemId, purchasePrice, user) => {
+    await updateLocalItemPurchasePrice({ itemId, purchasePrice, user });
+    await get().fetchItems();
+    if (get().selectedItem?.id === itemId) {
+      await get().fetchItem(itemId);
+    }
+  },
+
   deleteItems: async (ids, user) => {
-    // Optimistic removal from local list
     set((state) => ({
       items:         state.items.filter((item) => !ids.includes(item.id)),
       lowStockItems: state.lowStockItems.filter((item) => !ids.includes(item.id)),
     }));
-    // Fire all deletes in parallel
     await Promise.all(ids.map((id) => deleteInventoryItem(id, user)));
   },
 
@@ -168,10 +181,10 @@ const useInventoryStore = create((set, get) => ({
 
   // ─── Local UI State ────────────────────────────────────────────────────
 
-  setSelectedItem: (item) => set({ selectedItem: item, restockHistory: [], itemError: null }),
+  setSelectedItem:  (item) => set({ selectedItem: item, restockHistory: [], itemError: null }),
   clearSelectedItem: ()   => set({ selectedItem: null, restockHistory: [], itemError: null }),
-  clearError: ()          => set({ error: null }),
-  clearItemError: ()      => set({ itemError: null }),
+  clearError:        ()   => set({ error: null }),
+  clearItemError:    ()   => set({ itemError: null }),
 
   getCategoryName: (categoryId) => {
     if (!categoryId) return '—';

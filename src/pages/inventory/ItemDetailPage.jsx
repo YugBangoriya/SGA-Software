@@ -1,4 +1,4 @@
-// SGA — Last updated: Bug Fix #3 — Added SellingPriceEditor to ItemDetailPage so Owner can edit selling price directly on the item detail page
+// SGA — Last updated: Added untracked item display (totalSold counter, no stock bar), stock tracking toggle with confirmation dialog, Local Item purchase price editor
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
@@ -32,6 +32,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, RefreshCw, Package, Calendar, Tag, IndianRupee,
   TruckIcon, AlertTriangle, Edit2, Check, X, History, Info, Trash2,
+  ToggleLeft, ToggleRight,
 } from 'lucide-react';
 
 import useInventoryStore from '../../store/inventoryStore';
@@ -507,11 +508,15 @@ export default function ItemDetailPage() {
     getCategoryName,
     deleteItems,
     updateItem,
+    toggleTrackingMode,
   } = useInventoryStore();
 
-  const [showReplenish,  setShowReplenish]  = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [isDeleting,     setIsDeleting]     = useState(false);
+  const [showReplenish,    setShowReplenish]    = useState(false);
+  const [showDeleteModal,  setShowDeleteModal]  = useState(false);
+  const [isDeleting,       setIsDeleting]       = useState(false);
+  const [showTrackingDlg,  setShowTrackingDlg]  = useState(false);
+  const [trackingLoading,  setTrackingLoading]  = useState(false);
+  const [startingQtyInput, setStartingQtyInput] = useState('');  // for untracked→tracked
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'superadmin';
 
@@ -644,8 +649,8 @@ export default function ItemDetailPage() {
                 <Trash2 size={15} />
               </button>
 
-              {/* Replenish button */}
-              <button
+              {/* Replenish button — only for tracked items */}
+              {!item.isUntracked && <button
                 onClick={() => setShowReplenish(true)}
                 style={{
                   background: '#FFFFFF', color: COLORS.primary, border: 'none',
@@ -657,7 +662,7 @@ export default function ItemDetailPage() {
               >
                 <RefreshCw size={14} />
                 {!isMobile && 'Replenish'}
-              </button>
+              </button>}
             </div>
           )}
         </div>
@@ -680,56 +685,75 @@ export default function ItemDetailPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: COLORS.primary, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Current Stock
+                {item.isUntracked ? 'Sales Volume' : 'Current Stock'}
               </h3>
-              <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+              {item.isUntracked
+                ? <span style={{ fontSize: 10, fontWeight: 700, background: '#F5F0EE', color: '#888', padding: '3px 8px', borderRadius: RADII.full, fontFamily: TYPOGRAPHY.sans, letterSpacing: 0.5 }}>UNTRACKED</span>
+                : <StockStatusBadge quantity={item.quantity ?? 0} threshold={item.lowStockThreshold ?? 5} />
+              }
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 16 }}>
+            {item.isUntracked ? (
+              /* ── Untracked: show totalSold ── */
               <div>
                 <p style={{ margin: '0 0 4px', fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  Units in Stock
+                  Total Units Sold (all time)
                 </p>
-                <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 32, fontWeight: 700, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono, lineHeight: 1 }}>
+                    {item.totalSold ?? 0}
+                  </span>
+                  <span style={{ fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>units sold across approved invoices</span>
+                </div>
+                <div style={{ marginTop: 12, padding: '8px 12px', background: '#FFF8EE', borderRadius: RADII.md, border: '1px solid #FFD8A0', fontSize: 11, color: '#CC6600', fontFamily: TYPOGRAPHY.sans }}>
+                  This item has no stock ceiling. You can sell any quantity without a stock warning.
+                </div>
               </div>
-              <div style={{ flex: 1 }} />
+            ) : (
+              /* ── Tracked: show quantity + bar ── */
               <div>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'right' }}>
-                  Latest Price/Unit
-                </p>
-                <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono, textAlign: 'right' }}>
-                  {formatCurrency(item.purchasePrice)}
-                </p>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <p style={{ margin: '0 0 4px', fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Units in Stock
+                    </p>
+                    <QuantityDisplay quantity={item.quantity ?? 0} threshold={item.lowStockThreshold ?? 5} />
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  <div>
+                    <p style={{ margin: '0 0 4px', fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'right' }}>
+                      Latest Price/Unit
+                    </p>
+                    <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono, textAlign: 'right' }}>
+                      {item.purchasePrice != null ? formatCurrency(item.purchasePrice) : '—'}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ height: 8, background: COLORS.tableHeader, borderRadius: RADII.full, overflow: 'hidden', marginBottom: 6 }}>
+                    <div style={{
+                      height: '100%', borderRadius: RADII.full,
+                      background: (item.quantity ?? 0) <= 0 ? COLORS.statusRed : (item.quantity ?? 0) <= (item.lowStockThreshold ?? 5) ? COLORS.statusAmber : COLORS.statusGreen,
+                      width: `${Math.min(100, Math.max(4, ((item.quantity ?? 0) / Math.max((item.quantity ?? 0) * 1.5, (item.lowStockThreshold ?? 5) * 2 || 10)) * 100))}%`,
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>
+                    Alert threshold: {item.lowStockThreshold ?? 5} units
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Stock level bar */}
-            <div style={{ marginTop: 4 }}>
-              <div style={{
-                height: 8, background: COLORS.tableHeader,
-                borderRadius: RADII.full, overflow: 'hidden', marginBottom: 6,
-              }}>
-                <div style={{
-                  height: '100%', borderRadius: RADII.full,
-                  background:
-                    item.quantity <= 0 ? COLORS.statusRed
-                    : item.quantity <= (item.lowStockThreshold ?? 5) ? COLORS.statusAmber
-                    : COLORS.statusGreen,
-                  width: `${Math.min(100, Math.max(4, (item.quantity / Math.max(item.quantity * 1.5, (item.lowStockThreshold ?? 5) * 2 || 10)) * 100))}%`,
-                  transition: 'width 0.5s ease',
-                }} />
+            {/* Total sold line — shown for tracked items too */}
+            {!item.isUntracked && (item.totalSold ?? 0) > 0 && (
+              <div style={{ marginTop: 10, fontSize: 11, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
+                Total sold (all invoices): <strong style={{ color: COLORS.textPrimary }}>{item.totalSold}</strong> units
               </div>
-              <p style={{ margin: 0, fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>
-                Alert threshold: {item.lowStockThreshold ?? 5} units
-              </p>
-            </div>
+            )}
 
             {!isOwnerOrAdmin && (
-              <div style={{
-                marginTop: 12, background: COLORS.statusBlueBg,
-                borderRadius: RADII.md, padding: '8px 12px',
-                display: 'flex', gap: 6, alignItems: 'center',
-              }}>
+              <div style={{ marginTop: 12, background: COLORS.statusBlueBg, borderRadius: RADII.md, padding: '8px 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
                 <Info size={13} color={COLORS.statusBlue} />
                 <p style={{ margin: 0, fontSize: 11, color: COLORS.statusBlue, fontFamily: TYPOGRAPHY.sans }}>
                   Only the Owner can replenish inventory
@@ -818,6 +842,44 @@ export default function ItemDetailPage() {
                 {item.createdByName} · {formatDate(item.createdAt)}
               </span>
             </DetailRow>
+
+            {/* ── Local Item: Purchase Price missing badge ── */}
+            {item.category === 'Local Items' && (item.purchasePrice == null || item.purchasePrice === 0) && (
+              <div style={{ marginTop: 12, padding: '8px 12px', background: '#FFF8EE', border: '1px solid #FFD8A0', borderRadius: RADII.md, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <AlertTriangle size={13} color="#CC6600" />
+                <span style={{ fontSize: 12, color: '#CC6600', fontFamily: TYPOGRAPHY.sans }}>
+                  Purchase price not set — profit/loss for this item is excluded from reports until you enter it above.
+                </span>
+              </div>
+            )}
+
+            {/* ── Stock Tracking Mode Toggle (Owner/SuperAdmin) ── */}
+            {isOwnerOrAdmin && item.category !== 'Local Items' && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${COLORS.divider}` }}>
+                <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: TYPOGRAPHY.sans }}>
+                  Stock Tracking Mode
+                </p>
+                <div
+                  onClick={() => { setStartingQtyInput(''); setShowTrackingDlg(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    background: item.isUntracked ? '#FFF8EE' : '#F0FAF0',
+                    border: `1.5px solid ${item.isUntracked ? '#FFD8A0' : '#A8D8A8'}`,
+                    borderRadius: RADII.md, padding: '10px 14px', cursor: 'pointer',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: item.isUntracked ? '#CC6600' : '#1A7A1A', fontFamily: TYPOGRAPHY.sans }}>
+                      {item.isUntracked ? 'Untracked — click to enable stock tracking' : 'Tracked — click to disable stock tracking'}
+                    </div>
+                    <div style={{ fontSize: 11, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans, marginTop: 2 }}>
+                      {item.isUntracked ? 'Sales volume only. No stock ceiling.' : 'Quantity counted. Low-stock alerts active.'}
+                    </div>
+                  </div>
+                  {item.isUntracked ? <ToggleLeft size={24} color="#CC6600" /> : <ToggleRight size={24} color="#1A7A1A" />}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -890,6 +952,76 @@ export default function ItemDetailPage() {
           )}
         </div>
       </div>
+
+      {/* ── Tracking Mode Dialog ── */}
+      {showTrackingDlg && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={() => setShowTrackingDlg(false)}>
+          <div style={{ background: '#FFFFFF', borderRadius: 16, padding: '28px 24px', maxWidth: 380, width: '100%', boxShadow: '0 12px 48px rgba(0,0,0,0.3)' }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <div style={{ width: 52, height: 52, borderRadius: '50%', background: item.isUntracked ? '#F0FAF0' : '#FFF8EE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {item.isUntracked ? <ToggleRight size={24} color="#1A7A1A" /> : <ToggleLeft size={24} color="#CC6600" />}
+              </div>
+            </div>
+            <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: '#222', textAlign: 'center', fontFamily: TYPOGRAPHY.sans }}>
+              {item.isUntracked ? 'Enable Stock Tracking?' : 'Disable Stock Tracking?'}
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 1.5, fontFamily: TYPOGRAPHY.sans }}>
+              {item.isUntracked
+                ? 'This will enable quantity tracking for this item. Enter a starting stock quantity below.'
+                : `This will discard the current stock count of ${item.quantity ?? 0} units. The item will switch to sales-volume tracking only. This cannot be undone automatically.`}
+            </p>
+            {!item.isUntracked && (
+              <div style={{ background: '#FFEBEE', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: '#CC0000', fontFamily: TYPOGRAPHY.sans }}>
+                ⚠ Current stock count ({item.quantity ?? 0} units) will be permanently discarded.
+              </div>
+            )}
+            {item.isUntracked && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#444', marginBottom: 6, fontFamily: TYPOGRAPHY.sans }}>
+                  Starting Quantity *
+                </label>
+                <input
+                  type="number" min="0"
+                  value={startingQtyInput}
+                  onChange={(e) => setStartingQtyInput(e.target.value)}
+                  placeholder="Enter starting stock count"
+                  autoFocus
+                  style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #E8E2DF', borderRadius: 8, fontSize: 14, fontFamily: TYPOGRAPHY.mono, outline: 'none', boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setShowTrackingDlg(false)} disabled={trackingLoading}
+                style={{ flex: 1, padding: '11px 0', background: 'none', border: '1.5px solid #E8E2DF', borderRadius: 8, color: '#444', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: TYPOGRAPHY.sans }}>
+                Cancel
+              </button>
+              <button
+                disabled={trackingLoading || (item.isUntracked && startingQtyInput === '')}
+                onClick={async () => {
+                  setTrackingLoading(true);
+                  try {
+                    await toggleTrackingMode(item.id, !item.isUntracked, item.isUntracked ? Number(startingQtyInput) : 0, user);
+                    setShowTrackingDlg(false);
+                    fetchItem(item.id);
+                  } catch (err) { console.error(err); }
+                  finally { setTrackingLoading(false); }
+                }}
+                style={{
+                  flex: 1, padding: '11px 0',
+                  background: trackingLoading ? '#888' : (item.isUntracked ? '#1A7A1A' : '#CC6600'),
+                  border: 'none', borderRadius: 8, color: '#FFFFFF',
+                  fontSize: 14, fontWeight: 700,
+                  cursor: trackingLoading || (item.isUntracked && startingQtyInput === '') ? 'not-allowed' : 'pointer',
+                  fontFamily: TYPOGRAPHY.sans,
+                }}>
+                {trackingLoading ? 'Saving…' : (item.isUntracked ? 'Enable Tracking' : 'Disable Tracking')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Replenish Modal ── */}
       {showReplenish && (

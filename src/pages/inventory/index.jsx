@@ -1,4 +1,4 @@
-// SGA — Last updated: Added Returned Items indicator in summary strip (clickable, shows modal with per-item return quantities); tracks returnedQuantity field set on return invoice approval
+// SGA — Last updated: Untracked items display totalSold instead of quantity; Local Items filter chip; cost-missing badge on Local Items; StockStatusBadge/QuantityDisplay handle isUntracked (clickable, shows modal with per-item return quantities); tracks returnedQuantity field set on return invoice approval
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -41,11 +41,23 @@ import HomeButton from '../../components/ui/HomeButton';
 
 // ─── Shared Sub-Components ─────────────────────────────────────────────────
 
-export function StockStatusBadge({ quantity, threshold }) {
+export function StockStatusBadge({ quantity, threshold, isUntracked }) {
+  if (isUntracked) {
+    return (
+      <span style={{
+        background: '#F5F0EE', color: '#888888',
+        fontSize: 10, fontWeight: 700, padding: '3px 8px',
+        borderRadius: RADII.full, letterSpacing: 0.6,
+        fontFamily: TYPOGRAPHY.sans, whiteSpace: 'nowrap',
+      }}>
+        UNTRACKED
+      </span>
+    );
+  }
   let bg, color, label;
-  if (quantity <= 0) {
+  if ((quantity ?? 0) <= 0) {
     bg = COLORS.statusRedBg; color = COLORS.statusRed; label = 'OUT OF STOCK';
-  } else if (quantity <= threshold) {
+  } else if ((quantity ?? 0) <= threshold) {
     bg = COLORS.statusAmberBg; color = COLORS.statusAmber; label = 'LOW STOCK';
   } else {
     bg = COLORS.statusGreenBg; color = COLORS.statusGreen; label = 'IN STOCK';
@@ -67,11 +79,22 @@ export function StockStatusBadge({ quantity, threshold }) {
   );
 }
 
-export function QuantityDisplay({ quantity, threshold }) {
+export function QuantityDisplay({ quantity, threshold, isUntracked, totalSold }) {
+  if (isUntracked) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#AAAAAA', flexShrink: 0 }} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#888888', fontFamily: TYPOGRAPHY.mono, lineHeight: 1 }}>
+          {totalSold ?? 0}
+          <span style={{ fontSize: 9, fontWeight: 500, marginLeft: 3 }}>sold</span>
+        </span>
+      </div>
+    );
+  }
   let color;
-  if (quantity <= 0)         color = COLORS.statusRed;
-  else if (quantity <= threshold) color = COLORS.statusAmber;
-  else                       color = COLORS.statusGreen;
+  if ((quantity ?? 0) <= 0)              color = COLORS.statusRed;
+  else if ((quantity ?? 0) <= threshold) color = COLORS.statusAmber;
+  else                                   color = COLORS.statusGreen;
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -86,7 +109,7 @@ export function QuantityDisplay({ quantity, threshold }) {
         fontFamily: TYPOGRAPHY.mono,
         lineHeight: 1,
       }}>
-        {quantity}
+        {quantity ?? 0}
       </span>
     </div>
   );
@@ -247,6 +270,9 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
           fontFamily: TYPOGRAPHY.sans,
         }}>
           {item.itemName}
+          {item.category === 'Local Items' && (item.purchasePrice == null || item.purchasePrice === 0) && (
+            <span style={{ marginLeft: 7, fontSize: 9, background: '#FFF3E0', color: '#CC6600', padding: '1px 5px', borderRadius: 3, fontWeight: 700, verticalAlign: 'middle' }}>⚠ Cost missing</span>
+          )}
         </p>
         {item.notes && (
           <p style={{ margin: '2px 0 0', fontSize: 11, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>
@@ -261,10 +287,10 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
       </span>
 
       {/* Stock Status */}
-      <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+      <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} isUntracked={item.isUntracked} />
 
-      {/* Quantity */}
-      <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+      {/* Quantity / Sold counter */}
+      <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} isUntracked={item.isUntracked} totalSold={item.totalSold} />
 
       {/* Purchase Price */}
       <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono, opacity: selectMode && !selected ? 0.7 : 1 }}>
@@ -295,6 +321,9 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
       {/* Actions */}
       {!selectMode && (
         isOwnerOrAdmin ? (
+          item.isUntracked ? (
+            <span style={{ fontSize: 11, color: '#AAAAAA', fontFamily: TYPOGRAPHY.sans }}>Untracked</span>
+          ) : (
           <button
             onClick={(e) => { e.stopPropagation(); onReplenish(item); }}
             style={{
@@ -321,6 +350,7 @@ function DesktopRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClic
           >
             + Replenish
           </button>
+          )
         ) : (
           <span style={{ fontSize: 12, color: COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>View only</span>
         )
@@ -376,16 +406,19 @@ function MobileRow({ item, getCategoryName, isOwnerOrAdmin, onReplenish, onClick
             </p>
             <p style={{ margin: '2px 0 0', fontSize: 12, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans }}>
               {getCategoryName(item.categoryId)}
+              {item.category === 'Local Items' && (item.purchasePrice == null || item.purchasePrice === 0) && (
+                <span style={{ marginLeft: 6, fontSize: 10, background: '#FFF3E0', color: '#CC6600', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>⚠ Cost missing</span>
+              )}
             </p>
           </div>
-          <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+          <StockStatusBadge quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} isUntracked={item.isUntracked} />
         </div>
 
         {/* Bottom row: stats + replenish */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 18 }}>
-            <MetaStat label="Qty">
-              <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} />
+            <MetaStat label={item.isUntracked ? "Sold" : "Qty"}>
+              <QuantityDisplay quantity={item.quantity} threshold={item.lowStockThreshold ?? 5} isUntracked={item.isUntracked} totalSold={item.totalSold} />
             </MetaStat>
             <MetaStat label="Price/Unit">
               <span style={{ fontWeight: 600, fontSize: 13, color: COLORS.textPrimary, fontFamily: TYPOGRAPHY.mono }}>

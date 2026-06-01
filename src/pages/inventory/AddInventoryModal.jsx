@@ -1,19 +1,15 @@
-// SGA — Last updated: Added sellingPrice field in 2x2 grid layout (Qty | Purchase Price / Low Stock | Selling Price); stored to Firestore via addItem
+// SGA — Last updated: Added isUntracked toggle — quantity and lowStockThreshold are now optional when stock tracking is disabled
 /**
  * AddInventoryModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add a brand-new inventory item.
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { X, Package, Calendar, Tag, Hash, DollarSign, Truck, AlertTriangle, Info, Loader } from 'lucide-react';
+import { X, Package, Calendar, Tag, Hash, Truck, AlertTriangle, Info, Loader, ToggleLeft, ToggleRight } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
 import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
 
-// ─── Helper ────────────────────────────────────────────────────────────────
-
 const todayISO = () => new Date().toISOString().split('T')[0];
-
-// ─── Shared styled input ───────────────────────────────────────────────────
 
 function FormField({ label, required, hint, error, children }) {
   return (
@@ -61,19 +57,19 @@ const inputStyle = (hasError = false, extraStyle = {}) => ({
   ...extraStyle,
 });
 
-// ─── Main Component ────────────────────────────────────────────────────────
-
 export default function AddInventoryModal({ categories: _propCategories, user, onClose, onSuccess }) {
   const { addItem, categories, categoriesLoading, fetchCategories } = useInventoryStore();
 
   const today = todayISO();
+
+  const [isUntracked, setIsUntracked] = useState(false);
 
   const [form, setForm] = useState({
     itemName:              '',
     categoryId:            '',
     quantityAdded:         '',
     purchasePrice:         '',
-    sellingPrice:          '',   // NEW: selling price field
+    sellingPrice:          '',
     dateOrderedOrReceived: today,
     vendorName:            '',
     lowStockThreshold:     '5',
@@ -87,9 +83,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
 
   const firstInputRef = useRef(null);
 
-  useEffect(() => {
-    firstInputRef.current?.focus();
-  }, []);
+  useEffect(() => { firstInputRef.current?.focus(); }, []);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -98,34 +92,34 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
   }, [onClose]);
 
   useEffect(() => {
-    if (categories.length === 0 && !categoriesLoading) {
-      fetchCategories();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (categories.length === 0 && !categoriesLoading) fetchCategories();
+  }, []); // eslint-disable-line
 
   const set = (field) => (e) => {
     const value = e.target.value;
     setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
-    if (field === 'dateOrderedOrReceived') {
-      setIsDateManuallySet(value !== today);
-    }
+    if (field === 'dateOrderedOrReceived') setIsDateManuallySet(value !== today);
   };
 
   const validate = () => {
     const errs = {};
-    if (!form.itemName.trim())
-      errs.itemName = 'Item name is required';
-    if (!form.quantityAdded || isNaN(form.quantityAdded) || Number(form.quantityAdded) <= 0)
-      errs.quantityAdded = 'Enter a valid quantity (must be > 0)';
-    if (!form.purchasePrice || isNaN(form.purchasePrice) || Number(form.purchasePrice) < 0)
+    if (!form.itemName.trim()) errs.itemName = 'Item name is required';
+
+    if (!isUntracked) {
+      // Tracked: quantity required
+      if (!form.quantityAdded || isNaN(form.quantityAdded) || Number(form.quantityAdded) <= 0)
+        errs.quantityAdded = 'Enter a valid quantity (must be > 0)';
+      if (!form.lowStockThreshold || isNaN(form.lowStockThreshold) || Number(form.lowStockThreshold) < 0)
+        errs.lowStockThreshold = 'Enter a valid threshold (0 or more)';
+    }
+
+    if (form.purchasePrice !== '' && (isNaN(form.purchasePrice) || Number(form.purchasePrice) < 0))
       errs.purchasePrice = 'Enter a valid purchase price';
     if (form.sellingPrice !== '' && (isNaN(form.sellingPrice) || Number(form.sellingPrice) < 0))
       errs.sellingPrice = 'Enter a valid selling price (or leave blank)';
-    if (!form.dateOrderedOrReceived)
-      errs.dateOrderedOrReceived = 'Date is required';
-    if (!form.lowStockThreshold || isNaN(form.lowStockThreshold) || Number(form.lowStockThreshold) < 0)
-      errs.lowStockThreshold = 'Enter a valid threshold (0 or more)';
+    if (!form.dateOrderedOrReceived) errs.dateOrderedOrReceived = 'Date is required';
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -139,14 +133,15 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
         {
           itemName:              form.itemName.trim(),
           categoryId:            form.categoryId,
-          quantityAdded:         Number(form.quantityAdded),
-          purchasePrice:         Number(form.purchasePrice),
-          sellingPrice:          form.sellingPrice !== '' ? Number(form.sellingPrice) : null,
+          quantityAdded:         isUntracked ? null : Number(form.quantityAdded),
+          purchasePrice:         form.purchasePrice !== '' ? Number(form.purchasePrice) : null,
+          sellingPrice:          form.sellingPrice  !== '' ? Number(form.sellingPrice)  : null,
           dateOrderedOrReceived: form.dateOrderedOrReceived,
           vendorName:            form.vendorName.trim(),
-          lowStockThreshold:     Number(form.lowStockThreshold),
+          lowStockThreshold:     isUntracked ? null : Number(form.lowStockThreshold),
           notes:                 form.notes.trim(),
           isDateManuallySet,
+          isUntracked,
         },
         user
       );
@@ -159,42 +154,25 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
   };
 
   return (
-    /* Overlay */
     <div
       style={{
-        position:       'fixed',
-        inset:          0,
-        background:     'rgba(0,0,0,0.45)',
-        zIndex:         200,
-        display:        'flex',
-        alignItems:     'flex-end',
-        justifyContent: 'center',
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         backdropFilter: 'blur(2px)',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      {/* Bottom sheet */}
       <div style={{
-        background:    COLORS.cardBg,
-        borderRadius:  '20px 20px 0 0',
-        width:         '100%',
-        maxWidth:      640,
-        maxHeight:     '92vh',
-        overflow:      'hidden',
-        display:       'flex',
-        flexDirection: 'column',
-        boxShadow:     SHADOWS.modal,
-        animation:     'sgaSlideUp 0.25s ease-out',
+        background: COLORS.cardBg, borderRadius: '20px 20px 0 0',
+        width: '100%', maxWidth: 640, maxHeight: '92vh',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: SHADOWS.modal, animation: 'sgaSlideUp 0.25s ease-out',
       }}>
 
         {/* Header */}
         <div style={{
-          background:     COLORS.primary,
-          padding:        '18px 20px',
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'space-between',
-          flexShrink:     0,
+          background: COLORS.primary, padding: '18px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Package size={20} color="#FFF" />
@@ -203,22 +181,14 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
                 Add New Inventory Item
               </h2>
               <p style={{ margin: '2px 0 0', fontSize: 11, color: '#F0BABA', fontFamily: TYPOGRAPHY.sans }}>
-                Owner only · Quantity won't be deducted until invoice approval
+                Owner only · Quantity deducted only on invoice approval
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background:   'rgba(255,255,255,0.15)',
-              border:       'none',
-              borderRadius: RADII.md,
-              padding:      8,
-              cursor:       'pointer',
-              color:        '#FFF',
-              display:      'flex',
-            }}
-          >
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.15)', border: 'none',
+            borderRadius: RADII.md, padding: 8, cursor: 'pointer', color: '#FFF', display: 'flex',
+          }}>
             <X size={18} />
           </button>
         </div>
@@ -226,7 +196,6 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
         {/* Scrollable body */}
         <div style={{ overflowY: 'auto', flex: 1, padding: '20px 20px 4px' }}>
 
-          {/* Section: Item Details */}
           <SectionHeading icon={<Tag size={14} />} label="Item Details" />
 
           <FormField label="Item Name" required error={errors.itemName}>
@@ -244,86 +213,90 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
           {/* Category */}
           <FormField
             label="Category"
-            hint={
-              categoriesLoading
-                ? 'Loading categories…'
-                : categories.length === 0
-                  ? 'No categories yet — manage them in Settings → Inventory Categories'
-                  : 'Manage categories in Settings → Inventory Categories'
-            }
+            hint={categoriesLoading ? 'Loading categories…' : categories.length === 0 ? 'No categories yet — manage in Settings' : 'Manage categories in Settings → Inventory Categories'}
           >
             <div style={{ position: 'relative' }}>
               <select
                 value={form.categoryId}
                 onChange={set('categoryId')}
                 disabled={categoriesLoading}
-                style={inputStyle(false, {
-                  appearance: 'none',
-                  cursor:     categoriesLoading ? 'not-allowed' : 'pointer',
-                  opacity:    categoriesLoading ? 0.6 : 1,
-                  paddingRight: categoriesLoading ? 36 : 12,
-                })}
+                style={inputStyle(false, { appearance: 'none', cursor: categoriesLoading ? 'not-allowed' : 'pointer', opacity: categoriesLoading ? 0.6 : 1 })}
               >
-                <option value="">
-                  {categoriesLoading ? 'Loading categories…' : '— Select a category (optional) —'}
-                </option>
+                <option value="">{categoriesLoading ? 'Loading…' : '— Select a category (optional) —'}</option>
                 {!categoriesLoading && categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
               </select>
-
-              {categoriesLoading && (
-                <div style={{
-                  position:       'absolute',
-                  right:          10,
-                  top:            '50%',
-                  transform:      'translateY(-50%)',
-                  pointerEvents:  'none',
-                  display:        'flex',
-                  alignItems:     'center',
-                }}>
-                  <div style={{
-                    width:          14,
-                    height:         14,
-                    border:         `2px solid ${COLORS.tableHeader}`,
-                    borderTopColor: COLORS.primary,
-                    borderRadius:   '50%',
-                    animation:      'sgaSpin 0.7s linear infinite',
-                  }} />
-                </div>
-              )}
             </div>
           </FormField>
 
-          {/* ── Section: Stock Details — 2×2 grid ── */}
-          <SectionHeading icon={<Hash size={14} />} label="Stock Details" />
+          {/* ── Stock Tracking Toggle ── */}
+          <SectionHeading icon={<Hash size={14} />} label="Stock & Pricing" />
 
-          {/* Row 1: Quantity Added (left) | Purchase Price (right) */}
+          {/* Toggle */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: isUntracked ? '#FFF8EE' : '#F0FAF0',
+            border: `1.5px solid ${isUntracked ? '#FFD8A0' : '#A8D8A8'}`,
+            borderRadius: RADII.md, padding: '12px 14px', marginBottom: 16,
+            cursor: 'pointer',
+          }}
+            onClick={() => {
+              setIsUntracked((prev) => !prev);
+              setErrors({});
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: isUntracked ? '#CC6600' : '#1A7A1A', fontFamily: TYPOGRAPHY.sans }}>
+                {isUntracked ? 'Stock tracking OFF — Untracked item' : 'Stock tracking ON — Tracked item'}
+              </div>
+              <div style={{ fontSize: 11, color: COLORS.textSecondary, fontFamily: TYPOGRAPHY.sans, marginTop: 2 }}>
+                {isUntracked
+                  ? 'No stock count — sales volume shown instead. Suitable for items you always have on hand.'
+                  : 'Quantity is counted, decremented on invoice approval, low-stock alerts apply.'}
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, marginLeft: 12 }}>
+              {isUntracked
+                ? <ToggleLeft size={28} color="#CC6600" />
+                : <ToggleRight size={28} color="#1A7A1A" />
+              }
+            </div>
+          </div>
+
+          {/* Tracked fields: Qty + Low Stock Threshold */}
+          {!isUntracked && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
+              <FormField label="Quantity Added" required error={errors.quantityAdded}>
+                <input
+                  type="number" min="1" step="1"
+                  value={form.quantityAdded}
+                  onChange={set('quantityAdded')}
+                  placeholder="0"
+                  style={inputStyle(!!errors.quantityAdded, { fontFamily: TYPOGRAPHY.mono })}
+                  onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                  onBlur={(e)  => (e.target.style.borderColor = errors.quantityAdded ? COLORS.statusRed : COLORS.tableHeader)}
+                />
+              </FormField>
+              <FormField label="Low Stock Threshold" required error={errors.lowStockThreshold} hint="Alert when stock falls to this level">
+                <input
+                  type="number" min="0" step="1"
+                  value={form.lowStockThreshold}
+                  onChange={set('lowStockThreshold')}
+                  placeholder="5"
+                  style={inputStyle(!!errors.lowStockThreshold, { fontFamily: TYPOGRAPHY.mono })}
+                  onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                  onBlur={(e)  => (e.target.style.borderColor = errors.lowStockThreshold ? COLORS.statusRed : COLORS.tableHeader)}
+                />
+              </FormField>
+            </div>
+          )}
+
+          {/* Purchase Price + Selling Price — always shown */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="Quantity Added" required error={errors.quantityAdded}>
+            <FormField label="Purchase Price / Unit (₹)" error={errors.purchasePrice} hint="Cost you paid per unit (optional)">
               <input
-                type="number"
-                min="1"
-                step="1"
-                value={form.quantityAdded}
-                onChange={set('quantityAdded')}
-                placeholder="0"
-                style={inputStyle(!!errors.quantityAdded, { fontFamily: TYPOGRAPHY.mono })}
-                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
-                onBlur={(e)  => (e.target.style.borderColor = errors.quantityAdded ? COLORS.statusRed : COLORS.tableHeader)}
-              />
-            </FormField>
-
-            <FormField
-              label="Purchase Price / Unit (₹)"
-              required
-              error={errors.purchasePrice}
-              hint="Cost you paid per unit"
-            >
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+                type="number" min="0" step="0.01"
                 value={form.purchasePrice}
                 onChange={set('purchasePrice')}
                 placeholder="0.00"
@@ -332,79 +305,32 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
                 onBlur={(e)  => (e.target.style.borderColor = errors.purchasePrice ? COLORS.statusRed : COLORS.tableHeader)}
               />
             </FormField>
-          </div>
-
-          {/* Row 2: Low Stock Threshold (left) | Selling Price (right) */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField
-              label="Low Stock Threshold"
-              required
-              error={errors.lowStockThreshold}
-              hint="Alert when stock falls to this level"
-            >
+            <FormField label="Selling Price / Unit (₹)" error={errors.sellingPrice} hint="Auto-filled in invoices">
               <input
-                type="number"
-                min="0"
-                step="1"
-                value={form.lowStockThreshold}
-                onChange={set('lowStockThreshold')}
-                placeholder="5"
-                style={inputStyle(!!errors.lowStockThreshold, { fontFamily: TYPOGRAPHY.mono })}
-                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
-                onBlur={(e)  => (e.target.style.borderColor = errors.lowStockThreshold ? COLORS.statusRed : COLORS.tableHeader)}
-              />
-            </FormField>
-
-            <FormField
-              label="Selling Price / Unit (₹)"
-              error={errors.sellingPrice}
-              hint="Auto-filled in invoices — leave blank if not set"
-            >
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+                type="number" min="0" step="0.01"
                 value={form.sellingPrice}
                 onChange={set('sellingPrice')}
                 placeholder="0.00"
-                style={inputStyle(!!errors.sellingPrice, {
-                  fontFamily:  TYPOGRAPHY.mono,
-                  borderColor: COLORS.primary,
-                  background:  '#FDFAF8',
-                })}
+                style={inputStyle(!!errors.sellingPrice, { fontFamily: TYPOGRAPHY.mono, borderColor: COLORS.primary, background: '#FDFAF8' })}
                 onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
                 onBlur={(e)  => (e.target.style.borderColor = errors.sellingPrice ? COLORS.statusRed : COLORS.primary)}
               />
             </FormField>
           </div>
 
-          {/* Selling price info tip */}
           {form.sellingPrice !== '' && Number(form.sellingPrice) > 0 && (
-            <div style={{
-              background:   '#F0FBF0',
-              border:       '1px solid #A8D8A8',
-              borderRadius: RADII.md,
-              padding:      '8px 12px',
-              marginBottom: 12,
-              display:      'flex',
-              alignItems:   'center',
-              gap:          6,
-            }}>
+            <div style={{ background: '#F0FBF0', border: '1px solid #A8D8A8', borderRadius: RADII.md, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 13, color: '#1A7A1A' }}>
-                ✓ Selling price <strong>₹{Number(form.sellingPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> will be auto-used when this item is added to an invoice.
+                ✓ Selling price <strong>₹{Number(form.sellingPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> will auto-fill in invoices.
               </span>
             </div>
           )}
 
-          {/* Section: Date & Vendor */}
+          {/* Date & Vendor */}
           <SectionHeading icon={<Calendar size={14} />} label="Receipt Details" />
 
-          <FormField
-            label="Date Ordered / Received"
-            required
-            error={errors.dateOrderedOrReceived}
-            hint={isDateManuallySet ? undefined : 'Defaults to today — change if backdating a purchase'}
-          >
+          <FormField label="Date Ordered / Received" required error={errors.dateOrderedOrReceived}
+            hint={isDateManuallySet ? undefined : 'Defaults to today'}>
             <input
               type="date"
               value={form.dateOrderedOrReceived}
@@ -419,14 +345,12 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             {isDateManuallySet && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
                 <AlertTriangle size={12} color={COLORS.statusAmber} />
-                <span style={{ fontSize: 11, color: COLORS.statusAmber, fontFamily: TYPOGRAPHY.sans }}>
-                  Date manually changed — this will be highlighted in the inventory list
-                </span>
+                <span style={{ fontSize: 11, color: COLORS.statusAmber, fontFamily: TYPOGRAPHY.sans }}>Date manually changed</span>
               </div>
             )}
           </FormField>
 
-          <FormField label="Supplier / Vendor Name" hint="Optional — for reference in restock history">
+          <FormField label="Supplier / Vendor Name" hint="Optional">
             <input
               value={form.vendorName}
               onChange={set('vendorName')}
@@ -437,51 +361,36 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             />
           </FormField>
 
-          {/* Section: Notes */}
-          <FormField label="Internal Notes" hint="Optional — visible to Owner and SuperAdmin only">
+          <FormField label="Internal Notes" hint="Optional — Owner and SuperAdmin only">
             <textarea
               value={form.notes}
               onChange={set('notes')}
               placeholder="Any internal notes about this item..."
               rows={2}
-              style={{
-                ...inputStyle(),
-                resize:    'vertical',
-                minHeight: 64,
-              }}
+              style={{ ...inputStyle(), resize: 'vertical', minHeight: 64 }}
               onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
               onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
             />
           </FormField>
 
-          {/* Info callout */}
           <div style={{
-            background:   COLORS.statusBlueBg,
-            border:       `1px solid #B3CCF0`,
-            borderRadius: RADII.md,
-            padding:      '10px 14px',
-            display:      'flex',
-            gap:          8,
-            alignItems:   'flex-start',
-            marginBottom: 16,
+            background: COLORS.statusBlueBg, border: `1px solid #B3CCF0`,
+            borderRadius: RADII.md, padding: '10px 14px',
+            display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 16,
           }}>
             <Info size={14} color={COLORS.statusBlue} style={{ marginTop: 1, flexShrink: 0 }} />
             <p style={{ margin: 0, fontSize: 12, color: COLORS.statusBlue, fontFamily: TYPOGRAPHY.sans, lineHeight: 1.5 }}>
-              Stock will be added immediately. Deduction from inventory only happens when an Owner <strong>approves</strong> an invoice — not when Employees create one.
+              {isUntracked
+                ? 'This item has no stock count. Sales volume will be tracked instead whenever it appears on an approved invoice.'
+                : 'Stock added immediately. Deduction only happens when an Owner approves an invoice.'}
             </p>
           </div>
 
-          {/* API error */}
           {apiError && (
             <div style={{
-              background:   COLORS.statusRedBg,
-              border:       `1px solid #F5C6C6`,
-              borderRadius: RADII.md,
-              padding:      '10px 14px',
-              color:        COLORS.statusRed,
-              fontSize:     13,
-              fontFamily:   TYPOGRAPHY.sans,
-              marginBottom: 16,
+              background: COLORS.statusRedBg, border: `1px solid #F5C6C6`,
+              borderRadius: RADII.md, padding: '10px 14px',
+              color: COLORS.statusRed, fontSize: 13, fontFamily: TYPOGRAPHY.sans, marginBottom: 16,
             }}>
               ⚠ {apiError}
             </div>
@@ -490,75 +399,37 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
 
         {/* Footer */}
         <div style={{
-          padding:        '14px 20px',
-          borderTop:      `1px solid ${COLORS.divider}`,
-          display:        'flex',
-          gap:            10,
-          justifyContent: 'flex-end',
-          background:     COLORS.cardBg,
-          flexShrink:     0,
+          padding: '14px 20px', borderTop: `1px solid ${COLORS.divider}`,
+          display: 'flex', gap: 10, justifyContent: 'flex-end',
+          background: COLORS.cardBg, flexShrink: 0,
         }}>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            style={{
-              background:   'transparent',
-              color:        COLORS.textSecondary,
-              border:       `1.5px solid ${COLORS.tableHeader}`,
-              borderRadius: RADII.md,
-              padding:      '10px 20px',
-              fontSize:     14,
-              fontWeight:   600,
-              cursor:       loading ? 'not-allowed' : 'pointer',
-              fontFamily:   TYPOGRAPHY.sans,
-            }}
-          >
+          <button onClick={onClose} disabled={loading} style={{
+            background: 'transparent', color: COLORS.textSecondary,
+            border: `1.5px solid ${COLORS.tableHeader}`, borderRadius: RADII.md,
+            padding: '10px 20px', fontSize: 14, fontWeight: 600,
+            cursor: loading ? 'not-allowed' : 'pointer', fontFamily: TYPOGRAPHY.sans,
+          }}>
             Cancel
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            style={{
-              background:     loading ? COLORS.primaryHover : COLORS.primary,
-              color:          '#FFF',
-              border:         'none',
-              borderRadius:   RADII.md,
-              padding:        '10px 28px',
-              fontSize:       14,
-              fontWeight:     700,
-              cursor:         loading ? 'not-allowed' : 'pointer',
-              fontFamily:     TYPOGRAPHY.sans,
-              minWidth:       120,
-              display:        'flex',
-              alignItems:     'center',
-              justifyContent: 'center',
-              gap:            8,
-            }}
-          >
+          <button onClick={handleSubmit} disabled={loading} style={{
+            background: loading ? COLORS.primaryHover : COLORS.primary,
+            color: '#FFF', border: 'none', borderRadius: RADII.md,
+            padding: '10px 28px', fontSize: 14, fontWeight: 700,
+            cursor: loading ? 'not-allowed' : 'pointer', fontFamily: TYPOGRAPHY.sans,
+            minWidth: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
             {loading ? (
               <>
-                <div style={{
-                  width:          15,
-                  height:         15,
-                  border:         '2px solid rgba(255,255,255,0.3)',
-                  borderTopColor: '#FFF',
-                  borderRadius:   '50%',
-                  animation:      'sgaSpin 0.7s linear infinite',
-                }} />
+                <div style={{ width: 15, height: 15, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'sgaSpin 0.7s linear infinite' }} />
                 Adding...
               </>
-            ) : (
-              '+ Add to Inventory'
-            )}
+            ) : '+ Add to Inventory'}
           </button>
         </div>
       </div>
 
       <style>{`
-        @keyframes sgaSlideUp {
-          from { transform: translateY(100%); opacity: 0; }
-          to   { transform: translateY(0);    opacity: 1; }
-        }
+        @keyframes sgaSlideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes sgaSpin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
@@ -567,23 +438,9 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
 
 function SectionHeading({ icon, label }) {
   return (
-    <div style={{
-      display:       'flex',
-      alignItems:    'center',
-      gap:           6,
-      marginBottom:  12,
-      paddingBottom: 8,
-      borderBottom:  `1.5px solid ${COLORS.tableHeader}`,
-    }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, paddingBottom: 8, borderBottom: `1.5px solid ${COLORS.tableHeader}` }}>
       <span style={{ color: COLORS.primary }}>{icon}</span>
-      <span style={{
-        fontSize:      11,
-        fontWeight:    700,
-        color:         COLORS.primary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.8,
-        fontFamily:    TYPOGRAPHY.sans,
-      }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: TYPOGRAPHY.sans }}>
         {label}
       </span>
     </div>

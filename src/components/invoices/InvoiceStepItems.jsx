@@ -1,4 +1,4 @@
-// SGA — Last updated: Price fallback changed from purchasePrice → 0 when no selling price is set; price field is now EDITABLE per-line-item during invoice creation; allows override of selling price
+// SGA — Last updated: Added 'Add unlisted item' form (Local Items); untracked inventory items suppress stock ceiling warnings; price fallback is 0 when no selling price set
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import {
-  Plus, Minus, Trash2, Search, Package, AlertTriangle, X, Pencil, Check,
+  Plus, Minus, Trash2, Search, Package, AlertTriangle, X, Pencil, Check, PlusCircle, Tag,
 } from "lucide-react";
 import { formatCurrency } from "../../lib/invoiceHelpers";
 
@@ -146,7 +146,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
       {items.length > 0 ? (
         <div style={{ marginBottom: 16 }}>
           {items.map((item) => {
-            const isOverQty = item.quantity > item.availableQty;
+            const isOverQty = !item.isUntracked && item.quantity > item.availableQty;
             const isPriceNotSet = item.priceSource === "not_set" || item.sellingPrice === 0;
             const isManual = item.priceSource === "manual_override";
             const isEditing = editingPriceId === item.inventoryItemId;
@@ -163,9 +163,14 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
               >
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{item.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{item.name}</span>
+                  {item.isLocalItem && (
+                    <span style={{ fontSize: 9, background: '#FFF3E0', color: '#CC6600', borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>LOCAL</span>
+                  )}
+                </div>
                     <div style={{ fontSize: 11, color: textSecondary, marginTop: 2 }}>
-                      Stock: {item.availableQty} available
+                      {item.isUntracked ? "Untracked — no stock limit" : `Stock: ${item.availableQty} available`}
                       {isOverQty && (
                         <span style={{ color: "#CC0000", marginLeft: 8, fontWeight: 600 }}>
                           ⚠ Exceeds stock
@@ -474,7 +479,8 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 <div style={{ textAlign: "center", padding: 30, color: textSecondary }}>No items found.</div>
               ) : (
                 filteredInventory.map((item) => {
-                  const outOfStock = (item.quantity || 0) === 0;
+                  const isUntracked = item.isUntracked === true;
+            const outOfStock = !isUntracked && (item.quantity || 0) === 0;
                   const alreadyAdded = items.find((i) => i.inventoryItemId === item.id);
                   const effectivePrice = getEffectivePrice(item);
                   const hasSellingPrice = item.sellingPrice != null && item.sellingPrice > 0;
