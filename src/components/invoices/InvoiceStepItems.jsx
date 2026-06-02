@@ -21,6 +21,12 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
   const [editingPriceId, setEditingPriceId] = useState(null);
   // Local draft price while editing
   const [priceDraft, setPriceDraft] = useState("");
+  // Unlisted / Local Item inline form
+  const [showUnlistedForm, setShowUnlistedForm] = useState(false);
+  const [unlistedName,  setUnlistedName]  = useState("");
+  const [unlistedPrice, setUnlistedPrice] = useState("");
+  const [unlistedQty,   setUnlistedQty]   = useState("1");
+  const [unlistedError, setUnlistedError] = useState("");
 
   const items = data.items || [];
   const isDark = darkMode;
@@ -134,6 +140,39 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
   const cancelEditPrice = () => {
     setEditingPriceId(null);
     setPriceDraft("");
+  };
+
+  // ── Add Unlisted / Local Item ─────────────────────────────────────────────
+  const submitUnlisted = () => {
+    const name  = unlistedName.trim();
+    const price = parseFloat(unlistedPrice);
+    const qty   = parseInt(unlistedQty, 10);
+    if (!name)                      { setUnlistedError("Item name is required"); return; }
+    if (isNaN(price) || price < 0)  { setUnlistedError("Enter a valid selling price (0 or more)"); return; }
+    if (isNaN(qty)   || qty < 1)    { setUnlistedError("Enter a valid quantity (min 1)"); return; }
+    onChange({
+      items: [
+        ...items,
+        {
+          inventoryItemId: null,
+          name,
+          category:        "Local Items",
+          quantity:        qty,
+          sellingPrice:    parseFloat(price.toFixed(2)),
+          purchasePrice:   null,
+          availableQty:    Infinity,
+          isLocalItem:     true,
+          isUntracked:     true,
+          priceSource:     "local_item",
+        },
+      ],
+    });
+    setUnlistedName("");
+    setUnlistedPrice("");
+    setUnlistedQty("1");
+    setUnlistedError("");
+    setShowUnlistedForm(false);
+    setShowPicker(false);
   };
 
   const itemsTotal = items.reduce(
@@ -425,12 +464,34 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 <span style={{ fontSize: 16, fontWeight: 700, color: textPrimary }}>
                   Select from Inventory
                 </span>
-                <button
-                  onClick={() => { setShowPicker(false); setSearch(""); }}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: textSecondary }}
-                >
-                  <X size={20} />
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button
+                    onClick={() => { setShowUnlistedForm(true); setSearch(""); }}
+                    title="Add item not in inventory"
+                    style={{
+                      background: "none",
+                      border: "1.5px solid #CC6600",
+                      borderRadius: 6,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      color: "#CC6600",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <PlusCircle size={13} /> Unlisted Item
+                  </button>
+                  <button
+                    onClick={() => { setShowPicker(false); setSearch(""); setShowUnlistedForm(false); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: textSecondary }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               {/* Price source legend */}
@@ -470,6 +531,129 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 />
               </div>
             </div>
+
+            {/* ── Unlisted Item Form ── */}
+            {showUnlistedForm && (
+              <div style={{
+                padding: "14px 18px",
+                borderBottom: `1px solid ${border}`,
+                background: isDark ? "#1A1A2A" : "#FFF8F0",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#CC6600", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Tag size={14} color="#CC6600" /> Add Unlisted Item (Local Item)
+                </div>
+
+                {/* Name */}
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: textSecondary, display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                    Item Name *
+                  </label>
+                  <input
+                    autoFocus
+                    value={unlistedName}
+                    onChange={(e) => { setUnlistedName(e.target.value); setUnlistedError(""); }}
+                    placeholder="e.g. Rubber Hose Clamp"
+                    onKeyDown={(e) => { if (e.key === "Enter") submitUnlisted(); }}
+                    style={{
+                      width: "100%", padding: "9px 10px",
+                      border: `1.5px solid ${border}`, borderRadius: 7,
+                      background: isDark ? "#2A2A2A" : "#FFFFFF",
+                      color: textPrimary, fontSize: 13, outline: "none",
+                      fontFamily: "inherit", boxSizing: "border-box",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#CC6600")}
+                    onBlur={(e)  => (e.target.style.borderColor = border)}
+                  />
+                </div>
+
+                {/* Price + Qty */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: textSecondary, display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                      Selling Price (₹) *
+                    </label>
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={unlistedPrice}
+                      onChange={(e) => { setUnlistedPrice(e.target.value); setUnlistedError(""); }}
+                      placeholder="0.00"
+                      style={{
+                        width: "100%", padding: "9px 10px",
+                        border: `1.5px solid ${border}`, borderRadius: 7,
+                        background: isDark ? "#2A2A2A" : "#FFFFFF",
+                        color: textPrimary, fontSize: 13, outline: "none",
+                        fontFamily: "'Courier New', monospace", boxSizing: "border-box",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "#CC6600")}
+                      onBlur={(e)  => (e.target.style.borderColor = border)}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: textSecondary, display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                      Quantity *
+                    </label>
+                    <input
+                      type="number" min="1" step="1"
+                      value={unlistedQty}
+                      onChange={(e) => { setUnlistedQty(e.target.value); setUnlistedError(""); }}
+                      style={{
+                        width: "100%", padding: "9px 10px",
+                        border: `1.5px solid ${border}`, borderRadius: 7,
+                        background: isDark ? "#2A2A2A" : "#FFFFFF",
+                        color: textPrimary, fontSize: 13, outline: "none",
+                        fontFamily: "'Courier New', monospace", boxSizing: "border-box",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "#CC6600")}
+                      onBlur={(e)  => (e.target.style.borderColor = border)}
+                    />
+                  </div>
+                </div>
+
+                {/* Error */}
+                {unlistedError && (
+                  <div style={{ fontSize: 12, color: "#CC0000", marginBottom: 6 }}>
+                    ⚠ {unlistedError}
+                  </div>
+                )}
+
+                {/* Info note */}
+                <div style={{
+                  fontSize: 11, color: "#CC6600",
+                  background: "#FFF3E0", borderRadius: 5,
+                  padding: "6px 10px", marginBottom: 10, lineHeight: 1.5,
+                }}>
+                  💡 This item will appear in <strong>Local Items</strong> in your inventory after the invoice is approved. You can set its purchase price there to enable profit tracking.
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => { setShowUnlistedForm(false); setUnlistedError(""); }}
+                    style={{
+                      flex: 1, padding: "9px 0",
+                      background: "none", border: `1px solid ${border}`,
+                      borderRadius: 7, color: textSecondary,
+                      fontWeight: 600, fontSize: 12,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    ← Back to list
+                  </button>
+                  <button
+                    onClick={submitUnlisted}
+                    style={{
+                      flex: 2, padding: "9px 0",
+                      background: "#CC6600", border: "none",
+                      borderRadius: 7, color: "#FFFFFF",
+                      fontWeight: 700, fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    + Add to Invoice
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Picker list */}
             <div style={{ overflowY: "auto", flex: 1, padding: "10px 14px" }}>
@@ -518,7 +702,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                         </div>
                         <div style={{ fontSize: 11, color: textSecondary, marginTop: 1 }}>
                           {item.category && <span>{item.category} · </span>}
-                          Stock: {item.quantity || 0}
+                          {isUntracked ? "Untracked — no limit" : `Stock: ${item.quantity || 0}`}
                           {outOfStock && <span style={{ color: "#CC0000", fontWeight: 600 }}> (Out of stock)</span>}
                         </div>
                       </div>

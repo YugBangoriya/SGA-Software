@@ -1,4 +1,5 @@
-// SGA — Last updated: Added HomeButton to header for quick home navigation
+// SGA — Last updated: Removed standalone BarChart2 icon box from header — inconsistent UI
+//   (no other page has a standalone icon box in its page header next to the Home button)
 /**
  * ReportingHub.jsx
  * Owner + SuperAdmin. Navigation screen for all reporting & analytics views.
@@ -15,7 +16,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   FileText, TrendingUp, AlertCircle, Users, MessageCircle,
-  Shield, ChevronRight, BarChart2,
+  Shield, ChevronRight,
 } from 'lucide-react';
 import useAuthStore from '@/store/authStore';
 import HomeButton from '../../components/ui/HomeButton';
@@ -88,16 +89,13 @@ export default function ReportingHub() {
 
   return (
     <div style={{ background: '#CDCBC9', minHeight: '100vh', paddingBottom: 80 }}>
-      {/* Header */}
+      {/* Header — HomeButton + title only, no standalone icon box */}
       <div style={{
         background: 'linear-gradient(135deg, #661F1F 0%, #8B3A3A 100%)',
         padding: '24px 20px 20px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <HomeButton />
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <BarChart2 size={22} color="#FFFFFF" />
-          </div>
           <div>
             <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 800, margin: 0, fontFamily: 'system-ui' }}>
               Reports &amp; Analytics

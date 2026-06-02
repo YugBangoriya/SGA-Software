@@ -1,4 +1,7 @@
-// src/components/quotations/QuotationPDF.jsx
+// SGA — Last updated: Fixed PDF generation failure — replaced external Google Fonts URL registration
+//   with built-in Helvetica/Courier fonts (same approach as InvoicePDF.jsx). External Font.register()
+//   calls were causing network failures that crashed the entire PDF render pipeline.
+// src/pages/quotations/QuotationPDF.jsx
 // Phase 5 — Quotation Module
 // PDF layout using @react-pdf/renderer.
 // All styling is done via StyleSheet (no Tailwind, no external CSS).
@@ -11,35 +14,18 @@ import {
   Text,
   View,
   StyleSheet,
-  Font,
   Image,
   Link,
 } from "@react-pdf/renderer";
 
-// Register fonts — Inter for body, JetBrains Mono for numbers/IDs
-Font.register({
-  family: "Inter",
-  fonts: [
-    {
-      src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff",
-      fontWeight: 400,
-    },
-    {
-      src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuGKYAZ9hiJ-Ek-_EeA.woff",
-      fontWeight: 600,
-    },
-    {
-      src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuFuYAZ9hiJ-Ek-_EeA.woff",
-      fontWeight: 700,
-    },
-  ],
-});
-
-Font.register({
-  family: "Mono",
-  src: "https://fonts.gstatic.com/s/robotomono/v22/L0xuDF4xlVMF-BfR8bXMIhJHg45mwgGEFl0_3vq_RuX9rGnq.woff",
-  fontWeight: 400,
-});
+// NOTE: We intentionally do NOT use Font.register() here.
+// External font URLs (e.g. Google Fonts) cause network failures inside
+// @react-pdf/renderer on production PWAs, crashing the PDF render pipeline.
+// InvoicePDF.jsx uses the same built-in approach successfully.
+// Built-in PDF fonts used:
+//   "Helvetica"        → replaces "Inter"  (body, headings, labels)
+//   "Helvetica-Bold"   → replaces "Inter" w/ fontWeight 700
+//   "Courier"          → replaces "Mono"   (numbers, IDs, amounts)
 
 // ─── Color tokens from Design Document ────────────────────────────────────────
 const C = {
@@ -58,7 +44,7 @@ const C = {
 
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
     fontSize: 10,
     color: C.nearBlack,
     backgroundColor: C.white,
@@ -90,14 +76,13 @@ const styles = StyleSheet.create({
   },
   businessName: {
     fontSize: 16,
-    fontWeight: 700,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
-    fontFamily: "Inter",
   },
   businessSubInfo: {
     fontSize: 8.5,
     color: C.gray,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
     marginTop: 1,
   },
   headerRight: {
@@ -107,14 +92,13 @@ const styles = StyleSheet.create({
   },
   quotationLabel: {
     fontSize: 22,
-    fontWeight: 700,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
     letterSpacing: 2,
-    fontFamily: "Inter",
     textTransform: "uppercase",
   },
   quotationNumberText: {
-    fontFamily: "Mono",
+    fontFamily: "Courier",
     fontSize: 12,
     color: C.nearBlack,
     marginTop: 2,
@@ -123,6 +107,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: C.gray,
     marginTop: 2,
+    fontFamily: "Helvetica",
   },
 
   // ─── Info Grid (Customer + Vehicle) ───────────────────────────────────────
@@ -141,12 +126,11 @@ const styles = StyleSheet.create({
   },
   infoBoxTitle: {
     fontSize: 8,
-    fontWeight: 600,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 5,
-    fontFamily: "Inter",
   },
   infoRow: {
     flexDirection: "row",
@@ -156,14 +140,13 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: C.gray,
     width: 80,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   infoValue: {
     fontSize: 9,
     color: C.nearBlack,
     flex: 1,
-    fontFamily: "Inter",
-    fontWeight: 600,
+    fontFamily: "Helvetica-Bold",
   },
 
   // ─── Items Table ──────────────────────────────────────────────────────────
@@ -172,12 +155,11 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 9,
-    fontWeight: 600,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 6,
-    fontFamily: "Inter",
   },
   tableHeader: {
     flexDirection: "row",
@@ -190,8 +172,7 @@ const styles = StyleSheet.create({
   tableHeaderCell: {
     fontSize: 8.5,
     color: C.white,
-    fontWeight: 600,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica-Bold",
   },
   tableRow: {
     flexDirection: "row",
@@ -210,12 +191,12 @@ const styles = StyleSheet.create({
   tableCell: {
     fontSize: 9.5,
     color: C.nearBlack,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   tableCellMono: {
     fontSize: 9.5,
     color: C.nearBlack,
-    fontFamily: "Mono",
+    fontFamily: "Courier",
   },
 
   // ─── Labour Row ───────────────────────────────────────────────────────────
@@ -231,8 +212,7 @@ const styles = StyleSheet.create({
     flex: 3,
     fontSize: 9.5,
     color: C.burgundyMed,
-    fontWeight: 600,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica-Bold",
   },
 
   // ─── Total Row ────────────────────────────────────────────────────────────
@@ -254,16 +234,14 @@ const styles = StyleSheet.create({
   totalLabel: {
     fontSize: 10,
     color: "#F0BABA",
-    fontWeight: 600,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica-Bold",
     textTransform: "uppercase",
     letterSpacing: 1,
   },
   totalAmount: {
     fontSize: 15,
     color: C.white,
-    fontWeight: 700,
-    fontFamily: "Mono",
+    fontFamily: "Courier-Bold",
   },
 
   // ─── Disclaimer ───────────────────────────────────────────────────────────
@@ -278,8 +256,7 @@ const styles = StyleSheet.create({
   disclaimerText: {
     fontSize: 8.5,
     color: "#7A4400",
-    fontFamily: "Inter",
-    fontStyle: "italic",
+    fontFamily: "Helvetica-Oblique",
   },
 
   // ─── Car Media Section ────────────────────────────────────────────────────
@@ -291,12 +268,11 @@ const styles = StyleSheet.create({
   },
   carMediaTitle: {
     fontSize: 9,
-    fontWeight: 600,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 6,
-    fontFamily: "Inter",
   },
   carMediaRow: {
     flexDirection: "row",
@@ -308,19 +284,19 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: C.burgundy,
     width: 12,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   carMediaLinkLabel: {
     fontSize: 9,
     color: C.gray,
     width: 80,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   carMediaLink: {
     fontSize: 9,
     color: C.blue,
     flex: 1,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
     textDecoration: "underline",
   },
 
@@ -333,12 +309,11 @@ const styles = StyleSheet.create({
   },
   socialTitle: {
     fontSize: 8,
-    fontWeight: 600,
+    fontFamily: "Helvetica-Bold",
     color: C.burgundy,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 6,
-    fontFamily: "Inter",
   },
   socialRow: {
     flexDirection: "row",
@@ -353,12 +328,12 @@ const styles = StyleSheet.create({
   socialPlatform: {
     fontSize: 8,
     color: C.gray,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   socialLink: {
     fontSize: 8.5,
     color: C.blue,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
     textDecoration: "underline",
   },
 
@@ -378,12 +353,12 @@ const styles = StyleSheet.create({
   footerLeft: {
     fontSize: 7.5,
     color: C.gray,
-    fontFamily: "Inter",
+    fontFamily: "Helvetica",
   },
   footerRight: {
     fontSize: 7.5,
     color: C.gray,
-    fontFamily: "Mono",
+    fontFamily: "Courier",
   },
 });
 
@@ -391,11 +366,11 @@ const styles = StyleSheet.create({
 
 function formatINR(amount) {
   const num = Number(amount || 0);
-  return `₹${num.toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
+  return `Rs.${num.toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
 }
 
 function formatDate(ts) {
-  if (!ts) return "—";
+  if (!ts) return "-";
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -462,11 +437,11 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             <Text style={styles.infoBoxTitle}>Customer Details</Text>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Name</Text>
-              <Text style={styles.infoValue}>{quotation.customerName || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.customerName || "-"}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Phone</Text>
-              <Text style={styles.infoValue}>{quotation.customerPhone || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.customerPhone || "-"}</Text>
             </View>
           </View>
 
@@ -475,11 +450,11 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             <Text style={styles.infoBoxTitle}>Vehicle Details</Text>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Company</Text>
-              <Text style={styles.infoValue}>{quotation.vehicleCompany || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.vehicleCompany || "-"}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Model</Text>
-              <Text style={styles.infoValue}>{quotation.vehicleModel || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.vehicleModel || "-"}</Text>
             </View>
             {quotation.vehicleYear ? (
               <View style={styles.infoRow}>
@@ -535,7 +510,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
               style={[styles.tableRow, i % 2 !== 0 && styles.tableRowAlt]}
             >
               <Text style={[styles.tableCell, styles.cellDescription]}>
-                {item.description || "—"}
+                {item.description || "-"}
               </Text>
               <Text
                 style={[
@@ -615,9 +590,9 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
         {/* ── DISCLAIMER ── */}
         <View style={styles.disclaimer}>
           <Text style={styles.disclaimerText}>
-            ⚠ Prices are subject to change. Please contact us for the latest
-            pricing. This quotation is valid for a limited period and is not a
-            final invoice.
+            Note: Prices are subject to change. Please contact us for the
+            latest pricing. This quotation is valid for a limited period and
+            is not a final invoice.
           </Text>
         </View>
 
@@ -625,27 +600,27 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
         {hasCarMedia && (
           <View style={styles.carMediaSection}>
             <Text style={styles.carMediaTitle}>
-              {quotation.vehicleCompany} {quotation.vehicleModel} — Media &amp; Reference
+              {quotation.vehicleCompany} {quotation.vehicleModel} - Media &amp; Reference
             </Text>
 
             {quotation.carDriveLink ? (
               <View style={styles.carMediaRow}>
-                <Text style={styles.carMediaIcon}>📷</Text>
+                <Text style={styles.carMediaIcon}>[IMG]</Text>
                 <Text style={styles.carMediaLinkLabel}>Photos &amp; Images</Text>
                 <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
-                  View on Google Drive →
+                  View on Google Drive
                 </Link>
               </View>
             ) : null}
 
             {(quotation.carReelLinks || []).map((reelUrl, i) => (
               <View key={i} style={styles.carMediaRow}>
-                <Text style={styles.carMediaIcon}>🎥</Text>
+                <Text style={styles.carMediaIcon}>[VID]</Text>
                 <Text style={styles.carMediaLinkLabel}>
                   Installation Video {i + 1}
                 </Text>
                 <Link src={reelUrl} style={styles.carMediaLink}>
-                  Watch on Instagram →
+                  Watch on Instagram
                 </Link>
               </View>
             ))}
@@ -685,7 +660,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
                   src={settings.socialLinks.googleMaps}
                   style={styles.socialLink}
                 >
-                  Find us on Google Maps →
+                  Find us on Google Maps
                 </Link>
               </View>
             )}

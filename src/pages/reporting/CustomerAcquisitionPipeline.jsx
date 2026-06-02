@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for consistent navigation across all report pages
 /**
  * CustomerAcquisitionPipeline.jsx
  * Owner-only. Reads /followUps (linked to conversations from Phase 8)
@@ -15,6 +16,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import HomeButton from '../../components/ui/HomeButton';
 import {
   MessageCircle, Search,
   AlertTriangle, CheckCircle, Clock, Send, RefreshCw,
@@ -289,12 +291,17 @@ export default function CustomerAcquisitionPipeline() {
     <div style={{ paddingBottom: 60 }}>
       {/* Header */}
       <div style={{ background: '#661F1F', padding: '20px 20px 16px' }}>
-        <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
-          Customer Acquisition Pipeline
-        </h2>
-        <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
-          {loading ? 'Loading…' : `${leads.length} active leads`}
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <HomeButton />
+          <div>
+            <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
+              Customer Acquisition Pipeline
+            </h2>
+            <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
+              {loading ? 'Loading…' : `${leads.length} active leads`}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Stats bar */}

@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for consistent navigation across all report pages
 /**
  * PendingInvoicesSummary.jsx
  * Owner-only. Two sections:
@@ -12,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Clock, AlertCircle, RefreshCw, CheckCircle, IndianRupee } from 'lucide-react';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -248,17 +250,22 @@ export default function PendingInvoicesSummary({ onNavigateToInvoice }) {
     <div style={{ paddingBottom: 60 }}>
       {/* Header */}
       <div style={{ background: '#661F1F', padding: '20px 20px 16px' }}>
-        <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
-          Pending Invoices
-        </h2>
-        <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <HomeButton />
+          <div>
+            <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
+              Pending Invoices
+            </h2>
+            <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
           {loading ? 'Loading…' : (
             <>
               {pendingApproval.length} awaiting approval
               {pendingPayment.length > 0 && ` · ${pendingPayment.length} with outstanding payments`}
             </>
           )}
-        </p>
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Outstanding amount banner */}

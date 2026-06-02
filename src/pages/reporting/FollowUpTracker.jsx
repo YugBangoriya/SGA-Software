@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for consistent navigation across all report pages
 /**
  * FollowUpTracker.jsx
  * Owner-only. Shows all /followUps documents.
@@ -11,6 +12,7 @@ import {
   collection, query, orderBy, onSnapshot, doc, updateDoc, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import HomeButton from '../../components/ui/HomeButton';
 import {
   Clock, Send, MessageCircle, XCircle, RefreshCw,
   CheckCircle, AlertTriangle, Calendar, Search,
@@ -303,15 +305,20 @@ export default function FollowUpTracker() {
     <div style={{ paddingBottom: 60 }}>
       {/* Header */}
       <div style={{ background: '#661F1F', padding: '20px 20px 16px' }}>
-        <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
-          Follow-up Tracker
-        </h2>
-        <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
-          {loading ? 'Loading…' : `${followUps.length} follow-ups`}
-          {overdueCount > 0 && (
-            <span style={{ color: '#FFAAAA', fontWeight: 700 }}> · {overdueCount} overdue</span>
-          )}
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <HomeButton />
+          <div>
+            <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
+              Follow-up Tracker
+            </h2>
+            <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
+              {loading ? 'Loading…' : `${followUps.length} follow-ups`}
+              {overdueCount > 0 && (
+                <span style={{ color: '#FFAAAA', fontWeight: 700 }}> · {overdueCount} overdue</span>
+              )}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Overdue banner */}

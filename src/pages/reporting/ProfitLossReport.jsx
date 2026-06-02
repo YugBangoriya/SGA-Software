@@ -1,3 +1,4 @@
+// SGA — Last updated: Added HomeButton to header for consistent navigation across all report pages
 /**
  * ProfitLossReport.jsx
  * Owner-only. Shows per-item and per-invoice P&L pulled from
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useProfitLoss } from '../../hooks/useProfitLoss';
 import { exportToCSV } from '../../lib/csvExport';
+import HomeButton from '../../components/ui/HomeButton';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -428,13 +430,16 @@ export default function ProfitLossReport() {
       {/* Header */}
       <div style={{ background: '#661F1F', padding: '20px 20px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
-              Profit &amp; Loss Report
-            </h2>
-            <p style={{ color: '#F0BABA', fontSize: 12, margin: '2px 0 0', fontFamily: 'system-ui' }}>
-              {data ? `${data.invoiceCount} approved invoices · ${data.byItem.length} items tracked` : 'Loading…'}
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <HomeButton />
+            <div>
+              <h2 style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 700, margin: 0, fontFamily: 'system-ui' }}>
+                Profit &amp; Loss Report
+              </h2>
+              <p style={{ color: '#F0BABA', fontSize: 12, margin: '2px 0 0', fontFamily: 'system-ui' }}>
+                {data ? `${data.invoiceCount} approved invoices · ${data.byItem.length} items tracked` : 'Loading…'}
+              </p>
+            </div>
           </div>
           <button
             onClick={refetch}
