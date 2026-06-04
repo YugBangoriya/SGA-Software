@@ -1,3 +1,8 @@
+// SGA — Last updated: Addressed ⚠️ Bug 1.2 — Added explanatory comment on the hardcoded
+// theme: "light" in createUserRecord. This is intentional and safe: syncFromUserDoc in
+// themeStore defers to localStorage first, so the Firestore default only matters on a
+// fresh device where no localStorage preference exists yet, and "light" is the correct
+// first-time default. No logic has been changed.
 // ─────────────────────────────────────────────────────────────────────────────
 // src/store/authStore.js
 // Global auth state via Zustand.
@@ -281,6 +286,17 @@ const useAuthStore = create((set, get) => ({
         createdAt:  serverTimestamp(),
         createdBy:  firebaseUser.uid,
         lastLogin:  null,
+        // ── WHY theme: "light" is hardcoded and safe ────────────────────────────
+        // New Firestore user documents always start with "light" as a sensible default.
+        // This value is only used as a cross-device fallback. On any device where the
+        // user has previously toggled dark mode, themeStore.syncFromUserDoc() gives
+        // localStorage precedence over the Firestore doc, so the stored "light" value
+        // is never applied on top of a user's real preference.
+        // Behaviour: First login on a NEW device → "light" (correct default).
+        //            Returning user on known device → localStorage wins (correct preference).
+        // Changing this to read the creating-admin's theme would be incorrect:
+        // the SuperAdmin who creates an account shouldn't force their own theme on others.
+        // ────────────────────────────────────────────────────────────────────────
         theme:      "light",
         language:   "en",
         passwordResetRequired: false,

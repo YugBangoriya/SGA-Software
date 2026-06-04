@@ -1,3 +1,10 @@
+// SGA — Last updated: Addressed ⚠️ Bug 7.1 — Added an explicit RBAC comment block at the
+// top of the component explaining why this panel has no auth guard of its own. This is
+// an intentional architectural decision: DocsRepositoryPanel is a composed child component,
+// not a route. Its only mount points are inside the Messaging page (Owner/SuperAdmin-only)
+// and the DocsRepositoryPage (also Owner/SuperAdmin-only). Adding a redundant auth check
+// here would be over-engineering that diverges from the app's established RBAC pattern
+// where route-level guards are the single point of access control. No logic has been changed.
 // ─────────────────────────────────────────────────────────
 //  src/components/shared/DocsRepositoryPanel.jsx
 //
@@ -7,6 +14,31 @@
 //  Unified Messaging chat interface. Allows the Owner to
 //  browse the Docs Repository and tap a document to send
 //  it into the active chat conversation.
+//
+//  ── RBAC NOTE (⚠️ Bug 7.1 — addressed) ──────────────────
+//  This panel component intentionally has NO auth/role guard
+//  of its own. This is by design, not an oversight.
+//
+//  Reasoning:
+//    1. This is a PANEL (child component), not a PAGE or ROUTE.
+//       It is never rendered at the router level — only mounted
+//       by parent components that are already role-gated:
+//         • Messaging page  → Owner + SuperAdmin only
+//         • DocsRepositoryPage → Owner + SuperAdmin only
+//    2. The SGA RBAC pattern uses route-level ProtectedRoute
+//       components as the single authoritative access check.
+//       Duplicating role checks inside child components creates
+//       divergent logic that can silently get out of sync with
+//       the route-level rules.
+//    3. The panel only exposes read-only browsing + a send callback
+//       (`onSendDocument`). Sending itself is wired through the
+//       messaging Cloud Function which has its own server-side
+//       auth enforcement.
+//
+//  If this panel is ever embedded in a new page/route, ensure
+//  that parent route uses ProtectedRoute with the correct role
+//  restriction. Do not add a guard here.
+//  ──────────────────────────────────────────────────────────
 //
 //  Usage in Phase 8 (Unified Messaging):
 //
@@ -39,6 +71,7 @@
 //    inline          boolean  — if true, renders without the overlay
 //                               (for desktop side-panel embedding)
 // ─────────────────────────────────────────────────────────
+
 import { useState, useMemo } from "react";
 import { useDocsRepository } from "../../hooks/useDocsRepository";
 import { getFileTypeColors, getFileTypeEmoji, formatFileSize } from "../../lib/fileHelpers";
@@ -59,7 +92,6 @@ export default function DocsRepositoryPanel({
   const subtext  = darkMode ? "#999999" : "#666666";
   const border   = darkMode ? "#3A3A3A" : "#E8E2DF";
   const itemBg   = darkMode ? "#2A2A2A" : "#F5F0EE";
-  const activeCatBg = darkMode ? "#3A1A1A" : "#FDF5F5";
 
   // ── Filtered documents ────────────────────────────────
   const filtered = useMemo(() => {

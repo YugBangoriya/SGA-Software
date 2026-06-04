@@ -1,3 +1,9 @@
+// SGA — Last updated: Fixed 🔴 Bug A — replaced `const { currentUser } = useAuth()` (always
+// undefined, since useAuth() has no `currentUser` key) with `const { uid: currentUserUid } = useAuth()`.
+// Added a null-guard in handleSendWhatsApp so that if the session has expired mid-form,
+// the component shows a clear error instead of crashing with "Cannot read properties of undefined".
+// No other behaviour or UI has been changed.
+//
 // src/pages/quotations/QuotationDetail.jsx
 // Phase 5 — Quotation Module
 // Shows full quotation, generates PDF via @react-pdf/renderer,
@@ -82,7 +88,12 @@ export default function QuotationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentUser } = useAuth();
+
+  // FIX: useAuth() returns { user, uid, displayName, role, ... } — it does NOT have a
+  // `currentUser` key. Destructuring `currentUser` previously always gave `undefined`,
+  // causing `currentUser.uid` to throw a TypeError when the WhatsApp send button was pressed.
+  // We now use `uid` directly, which is the string UID (or null when not authenticated).
+  const { uid: currentUserUid } = useAuth();
 
   // Try to use data passed from create form (avoids a Firestore fetch)
   const passedQuotation    = location.state?.quotation    || null;
@@ -179,6 +190,16 @@ export default function QuotationDetail() {
 
   // ─── Send via WhatsApp ───────────────────────────────────────────────────
   const handleSendWhatsApp = async () => {
+    // FIX: Guard against expired/missing session before attempting the send.
+    // `currentUserUid` is null when the user is not authenticated (e.g. session
+    // expired while the page was open). Previously this crashed with TypeError
+    // because `currentUser.uid` was called on undefined. Now we show a clear
+    // user-facing error instead.
+    if (!currentUserUid) {
+      setActionError("Your session has expired. Please log in again to send the quotation.");
+      return;
+    }
+
     setIsSendingWhatsApp(true);
     setActionError(null);
     try {
@@ -198,7 +219,7 @@ export default function QuotationDetail() {
         quotation.customerPhone,
         quotation.customerName,
         quotation.quotationNumber,
-        currentUser.uid
+        currentUserUid  // now a string UID, never undefined
       );
 
       setQuotation((prev) => ({

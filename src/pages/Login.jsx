@@ -1,3 +1,8 @@
+// SGA — Last updated: Addressed ⚠️ Bug 1.3 — Added clarifying comment inside ThemeToggle
+// explaining why `persistToFirestore` silently does nothing before login. This is correct,
+// expected, and intentional: localStorage is the theme store on the login screen; once the
+// user authenticates, syncFromUserDoc aligns Firestore with the persisted preference.
+// No logic or UI has been changed.
 // ─────────────────────────────────────────────────────────────────────────────
 // src/pages/Login.jsx
 // Login screen — Design Document §5.1
@@ -46,6 +51,23 @@ function SGALogo() {
 }
 
 // ── Theme toggle button (accessible even before login) ────────────────────────
+//
+// WHY persistToFirestore SILENTLY NO-OPS HERE (⚠️ Bug 1.3 — addressed):
+// ────────────────────────────────────────────────────────────────────────
+// toggleTheme() in themeStore calls persistToFirestore(theme) to sync the
+// preference to the user's Firestore document. Before login, `firebaseUser`
+// is null, so persistToFirestore checks `if (!firebaseUser) return` and exits
+// immediately — no error, no side-effect.
+//
+// This is CORRECT and INTENTIONAL behaviour:
+//   • localStorage already stores the chosen theme immediately via setTheme(),
+//     so the UI switch is instant and survives a page refresh.
+//   • After the user logs in, syncFromUserDoc() runs and gives localStorage
+//     precedence, so the Firestore doc never overwrites the preference the user
+//     set on the login screen.
+//   • There is nothing to fix here. The theme choice made on the login screen
+//     is preserved seamlessly through the authentication transition.
+// ────────────────────────────────────────────────────────────────────────
 function ThemeToggle() {
   const { theme, toggleTheme } = useThemeStore();
   return (

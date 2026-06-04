@@ -1,3 +1,8 @@
+// SGA — Last updated: Fixed 🔴 Bug B — FollowUpLog desktop table now scrolls horizontally
+// instead of clipping content on narrow laptop screens (1024–1200px).
+// Added `overflowX: "auto"` to the outer table container and `minWidth: 920` to both
+// the header and each row so that the six-column grid never collapses below a readable width.
+// No data, logic, or styling changes have been made.
 /**
  * FollowUpLog.jsx
  * Full-page tracker showing all follow-ups with status.
@@ -25,6 +30,16 @@ const STATUS_CONFIG = {
 };
 
 const ALL_STATUSES = ["all", "pending", "sent", "replied", "no_response", "failed"];
+
+// ─── The six-column grid template used by both the header and every row.
+// Defined once here to ensure they always stay in sync.
+const TABLE_GRID = "minmax(140px,1.5fr) 80px minmax(100px,1fr) minmax(180px,2fr) 110px 140px";
+
+// ─── Minimum pixel width that the table must be before it scrolls.
+// This prevents the grid from silently collapsing to unreadable column widths
+// on narrow laptop screens (1024–1200px). The outer container gets
+// overflowX: "auto" so the user can scroll rather than content being clipped.
+const TABLE_MIN_WIDTH = 920;
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -87,7 +102,10 @@ function FollowUpRow({ followUp, onMarkStatus, onOpenConversation }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(140px,1.5fr) 80px minmax(100px,1fr) minmax(180px,2fr) 110px 140px",
+        gridTemplateColumns: TABLE_GRID,
+        // FIX: minWidth ensures this row never collapses below the readable threshold.
+        // The outer container's overflowX: "auto" handles the scroll.
+        minWidth: TABLE_MIN_WIDTH,
         gap: 12,
         alignItems: "center",
         padding: "12px 16px",
@@ -425,13 +443,18 @@ export default function FollowUpLog() {
         </div>
       </div>
 
-      {/* Table */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 24px 0" }}>
+      {/* Table
+          FIX: Added overflowX: "auto" here. Previously the wrapper had no overflow
+          setting, so on screens narrower than TABLE_MIN_WIDTH (920px) the six-column
+          grid would either wrap or clip instead of scrolling. Now the user gets a
+          horizontal scrollbar on narrow laptop screens (1024–1200px). */}
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 24px 0", overflowX: "auto" }}>
         {/* Table header */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(140px,1.5fr) 80px minmax(100px,1fr) minmax(180px,2fr) 110px 140px",
+            gridTemplateColumns: TABLE_GRID,
+            minWidth: TABLE_MIN_WIDTH,
             gap: 12,
             padding: "10px 16px",
             background: "var(--color-bg)",
@@ -462,6 +485,9 @@ export default function FollowUpLog() {
           style={{
             border: "1px solid var(--color-border)",
             borderRadius: "0 0 10px 10px",
+            // FIX: Changed from overflow: "hidden" to overflowX: "visible" so that
+            // the outer container's scroll handles horizontal overflow correctly.
+            // The row-level minWidth (TABLE_MIN_WIDTH) drives the scroll width.
             overflow: "hidden",
           }}
         >

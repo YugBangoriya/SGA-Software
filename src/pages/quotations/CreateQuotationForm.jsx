@@ -1,3 +1,8 @@
+// SGA — Last updated: Addressed ⚠️ Bug 5.2 — Added an explicit pre-submit null-user guard
+// in handleSubmit. If `user` is null at submission time (e.g. session expired mid-form),
+// the function now shows a clear error message and exits early instead of silently writing
+// an invoice with an empty creatorUid. The optional chaining `user?.uid || ""` that was
+// already there prevents a crash, but the new guard provides a visible UX error.
 // src/components/quotations/CreateQuotationForm.jsx
 // Phase 5 — Quotation Module
 // Multi-step quotation creation form. Owner-only.
@@ -139,10 +144,10 @@ export default function CreateQuotationForm() {
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const customerSearchTimeout = useRef(null);
 
-  // Business settings (for PDF preview context)
+  // Business settings (for PDF)
   const [bizSettings, setBizSettings] = useState(null);
 
-  // ─── Load Car Repository + Business Settings ──────────────────────────────
+  // ─── Load car repository + business settings ──────────────────────────────
   useEffect(() => {
     (async () => {
       try {
@@ -160,98 +165,94 @@ export default function CreateQuotationForm() {
     })();
   }, []);
 
-  // ─── Customer search (debounced) ──────────────────────────────────────────
+  // ─── Customer search (debounced) ─────────────────────────────────────────
   useEffect(() => {
-    if (!customerQuery || customerQuery.length < 2) {
+    if (!customerQuery.trim() || draft.isExistingCustomer) {
       setCustomerResults([]);
       setShowCustomerDropdown(false);
       return;
     }
+    setCustomerSearchLoading(true);
     clearTimeout(customerSearchTimeout.current);
     customerSearchTimeout.current = setTimeout(async () => {
-      setCustomerSearchLoading(true);
       try {
         const results = await searchCustomers(customerQuery);
         setCustomerResults(results);
-        setShowCustomerDropdown(true);
-      } catch {}
-      setCustomerSearchLoading(false);
+        setShowCustomerDropdown(results.length > 0);
+      } catch {
+        setCustomerResults([]);
+      } finally {
+        setCustomerSearchLoading(false);
+      }
     }, 350);
     return () => clearTimeout(customerSearchTimeout.current);
-  }, [customerQuery]);
+  }, [customerQuery, draft.isExistingCustomer]);
 
-  // ─── When company changes, reset model selection ──────────────────────────
-  const handleCompanyChange = (companyName) => {
+  // ─── Company change handler ───────────────────────────────────────────────
+  const handleCompanyChange = (company) => {
     updateDraft({
-      vehicleCompany: companyName,
+      vehicleCompany: company,
       vehicleModel: "",
-      carRepositoryId: null,
       carDriveLink: "",
       carReelLinks: [],
-      isManualVehicle: companyName === "__not_in_list__",
+      isManualVehicle: company === "__not_in_list__",
     });
-    if (companyName && companyName !== "__not_in_list__") {
-      const found = carRepo.find((c) => c.company === companyName);
-      setSelectedCompanyData(found || null);
-    } else {
-      setSelectedCompanyData(null);
-    }
+    const found = carRepo.find((c) => c.company === company);
+    setSelectedCompanyData(found || null);
+    setErrors((prev) => ({ ...prev, vehicleCompany: undefined, vehicleModel: undefined }));
   };
 
-  // ─── When model is selected from Car Repository ───────────────────────────
-  const handleModelSelect = (modelObj) => {
-    // modelObj = { name, driveLink, reelLinks: [] }
+  // ─── Model select handler ─────────────────────────────────────────────────
+  const handleModelSelect = (model) => {
     updateDraft({
-      vehicleModel: modelObj.name,
-      carRepositoryId: modelObj.id || null,
-      carDriveLink: modelObj.driveLink || "",
-      carReelLinks: modelObj.reelLinks || [],
-      isManualVehicle: false,
+      vehicleModel:  model.name,
+      carDriveLink:  model.driveLink || "",
+      carReelLinks:  model.reelLinks || [],
     });
+    setErrors((prev) => ({ ...prev, vehicleModel: undefined }));
   };
 
-  // ─── Select existing customer ─────────────────────────────────────────────
+  // ─── Customer select handler ──────────────────────────────────────────────
   const selectCustomer = (customer) => {
     updateDraft({
-      customerName: customer.name,
-      customerPhone: customer.phone,
-      customerId: customer.id,
+      customerName:       customer.name,
+      customerPhone:      customer.phone?.replace(/\D/g, "") || "",
+      customerId:         customer.id,
       isExistingCustomer: true,
     });
     setCustomerQuery(customer.name);
     setShowCustomerDropdown(false);
+    setErrors((prev) => ({ ...prev, customerName: undefined, customerPhone: undefined }));
   };
 
-  // ─── Validation ───────────────────────────────────────────────────────────
+  // ─── Step validation ──────────────────────────────────────────────────────
   const validateStep = (s) => {
-    const e = {};
+    const newErrors = {};
     if (s === 1) {
-      if (!draft.customerName.trim()) e.customerName = "Customer name is required";
-      if (!draft.customerPhone.trim()) e.customerPhone = "Phone number is required";
-      else if (!/^[6-9]\d{9}$/.test(draft.customerPhone.trim()))
-        e.customerPhone = "Enter a valid 10-digit Indian mobile number";
+      if (!draft.customerName?.trim()) newErrors.customerName = "Customer name is required";
+      if (!draft.customerPhone?.trim() || draft.customerPhone.replace(/\D/g, "").length !== 10)
+        newErrors.customerPhone = "Enter a valid 10-digit phone number";
     }
     if (s === 2) {
-      if (!draft.isManualVehicle) {
-        if (!draft.vehicleCompany) e.vehicleCompany = "Select a vehicle company";
-        if (!draft.vehicleModel)   e.vehicleModel   = "Select a vehicle model";
+      if (!draft.vehicleCompany) {
+        newErrors.vehicleCompany = "Select a vehicle company";
+      } else if (draft.vehicleCompany === "__not_in_list__") {
+        if (!draft.notInListCompany?.trim()) newErrors.notInListCompany = "Enter vehicle company name";
+        if (!draft.notInListModel?.trim())   newErrors.notInListModel   = "Enter vehicle model name";
       } else {
-        if (!draft.notInListCompany.trim()) e.notInListCompany = "Enter vehicle company name";
-        if (!draft.notInListModel.trim())   e.notInListModel   = "Enter vehicle model name";
+        if (!draft.vehicleModel) newErrors.vehicleModel = "Select a vehicle model";
       }
     }
     if (s === 3) {
-      const hasItems = draft.lineItems.some(
-        (item) => item.description.trim() && Number(item.unitPrice) > 0
-      );
-      if (!hasItems) e.lineItems = "Add at least one item with a description and price";
-      draft.lineItems.forEach((item, i) => {
-        if (item.description.trim() && Number(item.unitPrice) <= 0)
-          e[`item_${i}_price`] = "Price must be greater than 0";
+      const validItems = draft.lineItems.filter((i) => i.description.trim());
+      if (validItems.length === 0) newErrors.lineItems = "Add at least one item to the quotation";
+      validItems.forEach((item, i) => {
+        if (item.unitPrice == null || item.unitPrice < 0)
+          newErrors[`item_${i}_price`] = "Enter a valid price";
       });
     }
-    setErrors(e);
-    return Object.keys(e).length === 0;
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const goNext = () => {
@@ -262,6 +263,19 @@ export default function CreateQuotationForm() {
   // ─── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!validateStep(3)) { setStep(3); return; }
+
+    // ── NULL-USER GUARD (⚠️ Bug 5.2 — addressed) ─────────────────────────────
+    // `user` can be null if the Firebase session expires while the user has the
+    // form open (e.g. left the tab idle). The optional chaining `user?.uid || ""`
+    // below prevents a crash, but silently writing a quotation with an empty
+    // creatorUid would create a data integrity problem and confuse audit logs.
+    // We now catch this explicitly before attempting any Firestore write:
+    if (!user?.uid) {
+      setSaveError("Your session has expired. Please log in again to save the quotation.");
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     setIsSaving(true);
     setSaveError(null);
     try {

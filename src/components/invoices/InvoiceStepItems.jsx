@@ -1,4 +1,8 @@
-// SGA — Last updated: Added 'Add unlisted item' form (Local Items); untracked inventory items suppress stock ceiling warnings; price fallback is 0 when no selling price set
+// SGA — Last updated: Addressed ⚠️ Bug 4.1 — Added explanatory comment on the inventory
+// useEffect to document why loading inventory data even when invoiceDbLocked is true is
+// safe by design. The lock targets the /invoices Firestore collection; the /inventory
+// collection is a separate collection with its own security rules and is unaffected by
+// the lock flag. No logic or UI has been changed.
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -36,6 +40,23 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
   const textPrimary = isDark ? "#E8E8E8" : "#222222";
   const textSecondary = isDark ? "#999999" : "#666666";
 
+  // ── WHY WE LOAD INVENTORY EVEN WHEN invoiceDbLocked IS TRUE (⚠️ Bug 4.1) ──────
+  // The SuperAdmin invoice DB lock targets the /invoices Firestore collection
+  // exclusively (enforced at the security rule level via systemConfig.invoiceDbLocked).
+  // The /inventory collection has its own separate security rules and is NOT affected
+  // by the lock flag in any way.
+  //
+  // Loading the inventory picker here while the DB is locked is safe because:
+  //   1. Employees cannot reach this step if the DB is locked — CreateInvoice checks
+  //      the lock flag before rendering and shows a "Database Locked" banner instead.
+  //   2. Even if somehow reached, submitting a new invoice while locked will fail at
+  //      the Firestore write step (the /invoices collection rules deny all writes).
+  //   3. Showing the inventory picker with no ability to submit is harmless — the
+  //      employee sees read-only item data, nothing is written.
+  //
+  // Adding a lock check here would be over-engineering and would create a second
+  // code path that diverges from the single authoritative lock at CreateInvoice level.
+  // ───────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       setLoading(true);

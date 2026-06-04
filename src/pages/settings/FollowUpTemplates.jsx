@@ -1,11 +1,29 @@
+// SGA — Last updated: Addressed ⚠️ Bug 11.3 — Added explanatory comment documenting
+// why an empty or non-existent /settings Firestore document is handled safely here.
+// followUpTemplates from useSettings() already defaults to [] when the doc is missing,
+// and the component renders a clear "No templates yet" empty state in that case.
+// No logic, UI, or schema has been changed.
+// ─────────────────────────────────────────────────────────────────────────────
 // src/pages/Settings/components/Owner/FollowUpTemplates.jsx
+//
 // Owner: full CRUD for follow-up message templates.
 // Each template: name + message in English, Hindi, Gujarati.
 // Templates are read by the Messaging module when scheduling follow-ups.
 //
-// FIX: Field names aligned with messagingStore schema.
+// FIX (Phase 8 Bug 8.4): Field names aligned with messagingStore schema.
 // Messaging (FollowUpScheduler) reads messageEn/messageHi/messageGu.
 // Settings previously used bodyEn/bodyHi/bodyGu — now corrected to match.
+//
+// ── EMPTY /settings DOC SAFETY NOTE (⚠️ Bug 11.3 — addressed) ─────────────
+// If the /settings Firestore document does not yet exist (fresh deployment),
+// useSettings() returns `{ followUpTemplates: [] }` via its internal fallback.
+// This component handles the empty array case with a clear empty state:
+//   "No templates yet. Add your first follow-up template."
+//
+// There is no crash, no undefined access, and no missing UI. The Owner simply
+// sees the empty state and can add their first template immediately. No seeding
+// of the /settings document is required for this component to function correctly.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState } from "react";
 import { SectionCard, FieldRow, Input, Textarea, Button, ConfirmDialog, T } from "./SettingsUI";
@@ -137,6 +155,9 @@ function TemplateCard({ template, onEdit, onDelete }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FollowUpTemplates() {
+  // Safety: useSettings() returns `followUpTemplates: []` when /settings doc is
+  // missing or has no templates array. The empty array is handled gracefully below
+  // with a "No templates yet" message. No crash possible from missing Firestore doc.
   const { followUpTemplates, setFollowUpTemplates } = useSettings();
   const [showForm, setShowForm]     = useState(false);
   const [form, setForm]             = useState(EMPTY_FORM);
@@ -252,6 +273,8 @@ export default function FollowUpTemplates() {
             />
           ))
         ) : (
+          // Empty state: shown safely when /settings doc is missing or has no templates.
+          // This is the correct first-run UX — the Owner simply adds their first template.
           <div
             style={{
               textAlign: "center",
