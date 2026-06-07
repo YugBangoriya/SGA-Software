@@ -11,15 +11,23 @@
  *   - Live auto-translate: typing in one language shows translations in the other two
  *   - Preview of what will be sent
  *   - Submit schedules the follow-up in Firestore
+ *
+ * Fixes applied (from Part 1 bug-fix session):
+ *   1. useCallback removed from import — it was imported but never used.
+ *   2. const { user: currentUser } = useAuth() — fixed from const { currentUser }
+ *      which always returned undefined (useAuth() has no currentUser key).
+ *   3. Debounce stale closure fixed — split into two separate useEffects with
+ *      clear responsibilities (init once / call on change), eliminating the race
+ *      condition where initialisation and invocation shared a single effect.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import useMessagingStore from "../../store/messagingStore";
 import { useAuth } from "../../hooks/useAuth";
 import { translateToLanguages, debounce } from "../../lib/translationApi";
 
 const LANG_LABELS = { en: "English", hi: "Hindi", gu: "Gujarati" };
-const LANG_FLAGS = { en: "🇬🇧", hi: "🇮🇳", gu: "🇮🇳" };
+const LANG_FLAGS  = { en: "🇬🇧", hi: "🇮🇳", gu: "🇮🇳" };
 
 // ─── Day preset chip ──────────────────────────────────────────────────────────
 function DayChip({ days, selected, onClick }) {
@@ -102,7 +110,14 @@ function TranslationSuggestion({ lang, text, onUse, loading }) {
         )}
       </div>
       {loading ? (
-        <div style={{ height: 16, background: "var(--color-border)", borderRadius: 4, animation: "pulse 1.4s ease-in-out infinite" }} />
+        <div
+          style={{
+            height: 16,
+            background: "var(--color-border)",
+            borderRadius: 4,
+            animation: "pulse 1.4s ease-in-out infinite",
+          }}
+        />
       ) : (
         <p
           style={{
@@ -123,7 +138,13 @@ function TranslationSuggestion({ lang, text, onUse, loading }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FollowUpScheduler() {
-  const { currentUser } = useAuth();
+  // FIX #2: useAuth() returns { user, uid, displayName, role, ... } — it has no
+  // `currentUser` key. Destructuring `currentUser` previously always gave undefined,
+  // meaning scheduleFollowUp({ ..., currentUser: undefined }) silently stored no
+  // creator on scheduled follow-ups. Fixed to `user: currentUser` so the actual
+  // Firebase User object is passed for the audit trail.
+  const { user: currentUser } = useAuth();
+
   const {
     setShowFollowUpModal,
     scheduleFollowUp,
@@ -135,18 +156,67 @@ export default function FollowUpScheduler() {
   const conversation = getActiveConversation();
 
   // ── Form state ──────────────────────────────────────────────────────────────
-  const [selectedDays, setSelectedDays] = useState(7);
-  const [customDate, setCustomDate] = useState("");
-  const [language, setLanguage] = useState("en");
-  const [message, setMessage] = useState("");
+  const [selectedDays, setSelectedDays]           = useState(7);
+  const [customDate, setCustomDate]               = useState("");
+  const [language, setLanguage]                   = useState("en");
+  const [message, setMessage]                     = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [saving, setSaving]                       = useState(false);
+  const [error, setError]                         = useState("");
 
   // ── Translation state ───────────────────────────────────────────────────────
   const [translations, setTranslations] = useState({ en: "", hi: "", gu: "" });
-  const [translating, setTranslating] = useState(false);
+  const [translating, setTranslating]   = useState(false);
+
+  // ── Debounced translate ref ─────────────────────────────────────────────────
+  // FIX #3: Stale closure eliminated by splitting into two effects.
+  //
+  // OLD pattern (bug): initialisation and invocation were mixed in a single
+  // effect with a `!debouncedTranslateRef.current` guard. On re-renders, the
+  // guard prevented re-initialisation but the ref's closure could be stale if
+  // `sourceLang` changed rapidly. Also prevented cleanup on unmount.
+  //
+  // NEW pattern (two effects):
+  //   Effect 1 (deps: []):         Create the debounced fn once at mount.
+  //                                Cancel on unmount — no setState on unmounted component.
+  //   Effect 2 (deps: [message, language]): Call the stable ref whenever input changes.
+  //
+  // `sourceLang` is a PARAMETER (not captured in closure), so it always reflects
+  // the current value at call time. `setTranslations` / `setTranslating` are stable
+  // React state setters — zero stale closure risk.
+  // ─────────────────────────────────────────────────────────────────────────────
   const debouncedTranslateRef = useRef(null);
+
+  // Effect 1: Create the debounced function exactly once at component mount.
+  useEffect(() => {
+    debouncedTranslateRef.current = debounce(async (text, sourceLang) => {
+      if (!text.trim()) {
+        setTranslations({ en: "", hi: "", gu: "" });
+        return;
+      }
+      setTranslating(true);
+      try {
+        const targets = ["en", "hi", "gu"].filter((l) => l !== sourceLang);
+        const result  = await translateToLanguages(text, targets);
+        setTranslations({ ...result, [sourceLang]: text });
+      } catch {
+        // Translation is a non-critical, API-pending feature — fail silently.
+        // The user can still send a message without auto-translation.
+      } finally {
+        setTranslating(false);
+      }
+    }, 900);
+
+    // Cancel any pending debounce call when component unmounts
+    return () => debouncedTranslateRef.current?.cancel?.();
+  }, []); // Empty deps: create once, never recreate — sourceLang is a parameter
+
+  // Effect 2: Trigger translation whenever message or language changes.
+  useEffect(() => {
+    if (debouncedTranslateRef.current) {
+      debouncedTranslateRef.current(message, language);
+    }
+  }, [message, language]);
 
   // Compute scheduled date from selectedDays or customDate
   const getScheduledDate = () => {
@@ -163,34 +233,10 @@ export default function FollowUpScheduler() {
     if (!templateId) return;
     const tpl = followUpTemplates.find((t) => t.id === templateId);
     if (!tpl) return;
-
     const langKey = `message${language.charAt(0).toUpperCase() + language.slice(1)}`;
     const text = tpl[langKey] || tpl.messageEn || "";
     setMessage(text);
   };
-
-  // ── Live translation on message change ─────────────────────────────────────
-  useEffect(() => {
-    if (!debouncedTranslateRef.current) {
-      debouncedTranslateRef.current = debounce(async (text, sourceLang) => {
-        if (!text.trim()) {
-          setTranslations({ en: "", hi: "", gu: "" });
-          return;
-        }
-        setTranslating(true);
-        try {
-          const targets = ["en", "hi", "gu"].filter((l) => l !== sourceLang);
-          const result = await translateToLanguages(text, targets);
-          setTranslations({ ...result, [sourceLang]: text });
-        } catch {
-          // Translation is non-critical — fail silently
-        } finally {
-          setTranslating(false);
-        }
-      }, 900);
-    }
-    debouncedTranslateRef.current(message, language);
-  }, [message, language]);
 
   const handleUseTranslation = (lang, text) => {
     setLanguage(lang);
@@ -220,17 +266,14 @@ export default function FollowUpScheduler() {
     setError("");
     try {
       const scheduledDate = getScheduledDate();
-
-      // Firestore Timestamp requires a Date object
       const { Timestamp } = await import("firebase/firestore");
       await scheduleFollowUp({
         scheduledDate: Timestamp.fromDate(scheduledDate),
-        message: message.trim(),
+        message:       message.trim(),
         language,
-        templateId: selectedTemplateId || null,
-        currentUser,
+        templateId:    selectedTemplateId || null,
+        currentUser,   // now the actual Firebase User object (was undefined before fix)
       });
-
       setShowFirstReplyFollowUpPrompt(false);
     } catch (err) {
       console.error("Schedule error:", err);
@@ -244,9 +287,9 @@ export default function FollowUpScheduler() {
     const d = getScheduledDate();
     return d.toLocaleDateString("en-IN", {
       weekday: "short",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+      day:     "numeric",
+      month:   "long",
+      year:    "numeric",
     });
   })();
 
@@ -256,10 +299,10 @@ export default function FollowUpScheduler() {
       <div
         onClick={() => setShowFollowUpModal(false)}
         style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.45)",
-          zIndex: 200,
+          position:       "fixed",
+          inset:          0,
+          background:     "rgba(0,0,0,0.45)",
+          zIndex:         200,
           backdropFilter: "blur(2px)",
         }}
       />
@@ -267,39 +310,39 @@ export default function FollowUpScheduler() {
       {/* Modal */}
       <div
         style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "min(560px, 95vw)",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          background: "var(--color-card)",
-          borderRadius: 16,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          zIndex: 201,
-          display: "flex",
-          flexDirection: "column",
+          position:        "fixed",
+          top:             "50%",
+          left:            "50%",
+          transform:       "translate(-50%, -50%)",
+          width:           "min(560px, 95vw)",
+          maxHeight:       "90vh",
+          overflowY:       "auto",
+          background:      "var(--color-card)",
+          borderRadius:    16,
+          boxShadow:       "0 20px 60px rgba(0,0,0,0.3)",
+          zIndex:          201,
+          display:         "flex",
+          flexDirection:   "column",
         }}
       >
         {/* Header */}
         <div
           style={{
-            padding: "18px 20px 14px",
-            borderBottom: "1px solid var(--color-border)",
-            display: "flex",
-            alignItems: "center",
+            padding:        "18px 20px 14px",
+            borderBottom:   "1px solid var(--color-border)",
+            display:        "flex",
+            alignItems:     "center",
             justifyContent: "space-between",
-            flexShrink: 0,
+            flexShrink:     0,
           }}
         >
           <div>
             <h2
               style={{
-                margin: 0,
-                fontSize: 17,
+                margin:     0,
+                fontSize:   17,
                 fontWeight: 700,
-                color: "var(--color-text)",
+                color:      "var(--color-text)",
                 fontFamily: "'Inter', sans-serif",
               }}
             >
@@ -307,9 +350,9 @@ export default function FollowUpScheduler() {
             </h2>
             <p
               style={{
-                margin: "3px 0 0",
-                fontSize: 12,
-                color: "var(--color-text-secondary)",
+                margin:     "3px 0 0",
+                fontSize:   12,
+                color:      "var(--color-text-secondary)",
                 fontFamily: "'Inter', sans-serif",
               }}
             >
@@ -321,13 +364,13 @@ export default function FollowUpScheduler() {
           <button
             onClick={() => setShowFollowUpModal(false)}
             style={{
-              background: "none",
-              border: "none",
-              fontSize: 22,
-              cursor: "pointer",
-              color: "var(--color-text-secondary)",
-              padding: 4,
-              lineHeight: 1,
+              background:  "none",
+              border:      "none",
+              fontSize:    22,
+              cursor:      "pointer",
+              color:       "var(--color-text-secondary)",
+              padding:     4,
+              lineHeight:  1,
             }}
           >
             ×
@@ -335,16 +378,23 @@ export default function FollowUpScheduler() {
         </div>
 
         {/* Body */}
-        <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
-          {/* ── Date selection ─────────────────────────────────────────────── */}
+        <div
+          style={{
+            padding:        "18px 20px",
+            display:        "flex",
+            flexDirection:  "column",
+            gap:            18,
+          }}
+        >
+          {/* ── Date selection ──────────────────────────────────────────────── */}
           <div>
             <label
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
+                fontSize:    12,
+                fontWeight:  600,
+                color:       "var(--color-text)",
+                fontFamily:  "'Inter', sans-serif",
+                display:     "block",
                 marginBottom: 8,
               }}
             >
@@ -365,8 +415,8 @@ export default function FollowUpScheduler() {
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span
                   style={{
-                    fontSize: 12,
-                    color: "var(--color-text-secondary)",
+                    fontSize:   12,
+                    color:      "var(--color-text-secondary)",
                     fontFamily: "'Inter', sans-serif",
                   }}
                 >
@@ -382,23 +432,23 @@ export default function FollowUpScheduler() {
                     setSelectedDays(0);
                   }}
                   style={{
-                    padding: "6px 10px",
+                    padding:    "6px 10px",
                     borderRadius: 8,
-                    border: `1.5px solid ${customDate ? "#661F1F" : "var(--color-border)"}`,
+                    border:     `1.5px solid ${customDate ? "#661F1F" : "var(--color-border)"}`,
                     background: "var(--color-bg)",
-                    color: "var(--color-text)",
-                    fontSize: 12,
+                    color:      "var(--color-text)",
+                    fontSize:   12,
                     fontFamily: "'Inter', sans-serif",
-                    outline: "none",
+                    outline:    "none",
                   }}
                 />
               </div>
             </div>
             <div
               style={{
-                marginTop: 6,
-                fontSize: 12,
-                color: "#661F1F",
+                marginTop:  6,
+                fontSize:   12,
+                color:      "#661F1F",
                 fontWeight: 500,
                 fontFamily: "'Inter', sans-serif",
               }}
@@ -407,16 +457,16 @@ export default function FollowUpScheduler() {
             </div>
           </div>
 
-          {/* ── Template picker ────────────────────────────────────────────── */}
+          {/* ── Template picker ─────────────────────────────────────────────── */}
           {followUpTemplates.length > 0 && (
             <div>
               <label
                 style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--color-text)",
-                  fontFamily: "'Inter', sans-serif",
-                  display: "block",
+                  fontSize:    12,
+                  fontWeight:  600,
+                  color:       "var(--color-text)",
+                  fontFamily:  "'Inter', sans-serif",
+                  display:     "block",
                   marginBottom: 6,
                 }}
               >
@@ -426,15 +476,15 @@ export default function FollowUpScheduler() {
                 value={selectedTemplateId}
                 onChange={(e) => handleTemplateSelect(e.target.value)}
                 style={{
-                  width: "100%",
-                  padding: "9px 12px",
+                  width:       "100%",
+                  padding:     "9px 12px",
                   borderRadius: 8,
-                  border: "1.5px solid var(--color-border)",
-                  background: "var(--color-bg)",
-                  color: "var(--color-text)",
-                  fontSize: 13,
-                  fontFamily: "'Inter', sans-serif",
-                  outline: "none",
+                  border:      "1.5px solid var(--color-border)",
+                  background:  "var(--color-bg)",
+                  color:       "var(--color-text)",
+                  fontSize:    13,
+                  fontFamily:  "'Inter', sans-serif",
+                  outline:     "none",
                 }}
               >
                 <option value="">— Select a template —</option>
@@ -447,15 +497,15 @@ export default function FollowUpScheduler() {
             </div>
           )}
 
-          {/* ── Language selector ──────────────────────────────────────────── */}
+          {/* ── Language selector ────────────────────────────────────────────── */}
           <div>
             <label
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
+                fontSize:    12,
+                fontWeight:  600,
+                color:       "var(--color-text)",
+                fontFamily:  "'Inter', sans-serif",
+                display:     "block",
                 marginBottom: 6,
               }}
             >
@@ -467,15 +517,15 @@ export default function FollowUpScheduler() {
                   key={lang}
                   onClick={() => setLanguage(lang)}
                   style={{
-                    flex: 1,
-                    padding: "8px 4px",
+                    flex:       1,
+                    padding:    "8px 4px",
                     borderRadius: 8,
-                    border: `1.5px solid ${language === lang ? "#661F1F" : "var(--color-border)"}`,
+                    border:     `1.5px solid ${language === lang ? "#661F1F" : "var(--color-border)"}`,
                     background: language === lang ? "#661F1F12" : "var(--color-bg)",
-                    color: language === lang ? "#661F1F" : "var(--color-text)",
-                    fontSize: 12,
+                    color:      language === lang ? "#661F1F" : "var(--color-text)",
+                    fontSize:   12,
                     fontWeight: language === lang ? 700 : 400,
-                    cursor: "pointer",
+                    cursor:     "pointer",
                     fontFamily: "'Inter', sans-serif",
                     transition: "all 0.15s",
                   }}
@@ -486,15 +536,15 @@ export default function FollowUpScheduler() {
             </div>
           </div>
 
-          {/* ── Message input ──────────────────────────────────────────────── */}
+          {/* ── Message input ────────────────────────────────────────────────── */}
           <div>
             <label
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
+                fontSize:    12,
+                fontWeight:  600,
+                color:       "var(--color-text)",
+                fontFamily:  "'Inter', sans-serif",
+                display:     "block",
                 marginBottom: 6,
               }}
             >
@@ -512,28 +562,28 @@ export default function FollowUpScheduler() {
                   : "નમસ્તે, તમારી CNG કિટ વિશે..."
               }
               style={{
-                width: "100%",
-                padding: "10px 12px",
+                width:       "100%",
+                padding:     "10px 12px",
                 borderRadius: 8,
-                border: "1.5px solid var(--color-border)",
-                background: "var(--color-bg)",
-                color: "var(--color-text)",
-                fontSize: 13,
-                lineHeight: 1.6,
-                resize: "vertical",
-                outline: "none",
-                fontFamily: "'Inter', sans-serif",
-                boxSizing: "border-box",
-                transition: "border-color 0.15s",
+                border:      "1.5px solid var(--color-border)",
+                background:  "var(--color-bg)",
+                color:       "var(--color-text)",
+                fontSize:    13,
+                lineHeight:  1.6,
+                resize:      "vertical",
+                outline:     "none",
+                fontFamily:  "'Inter', sans-serif",
+                boxSizing:   "border-box",
+                transition:  "border-color 0.15s",
               }}
               onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-              onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+              onBlur={(e)  => (e.target.style.borderColor = "var(--color-border)")}
             />
             <div
               style={{
-                marginTop: 4,
-                fontSize: 11,
-                color: "var(--color-text-secondary)",
+                marginTop:  4,
+                fontSize:   11,
+                color:      "var(--color-text-secondary)",
                 fontFamily: "'Inter', sans-serif",
               }}
             >
@@ -541,14 +591,14 @@ export default function FollowUpScheduler() {
             </div>
           </div>
 
-          {/* ── Translation suggestions ────────────────────────────────────── */}
+          {/* ── Translation suggestions ──────────────────────────────────────── */}
           <div>
             <div
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text-secondary)",
-                fontFamily: "'Inter', sans-serif",
+                fontSize:    12,
+                fontWeight:  600,
+                color:       "var(--color-text-secondary)",
+                fontFamily:  "'Inter', sans-serif",
                 marginBottom: 4,
               }}
             >
@@ -567,17 +617,17 @@ export default function FollowUpScheduler() {
               ))}
           </div>
 
-          {/* ── Error ─────────────────────────────────────────────────────── */}
+          {/* ── Error ────────────────────────────────────────────────────────── */}
           {error && (
             <div
               style={{
-                padding: "8px 12px",
-                background: "#FFEBEE",
-                border: "1px solid #FFAAAA",
+                padding:     "8px 12px",
+                background:  "#FFEBEE",
+                border:      "1px solid #FFAAAA",
                 borderRadius: 8,
-                fontSize: 13,
-                color: "#CC0000",
-                fontFamily: "'Inter', sans-serif",
+                fontSize:    13,
+                color:       "#CC0000",
+                fontFamily:  "'Inter', sans-serif",
               }}
             >
               {error}
@@ -588,26 +638,26 @@ export default function FollowUpScheduler() {
         {/* Footer */}
         <div
           style={{
-            padding: "14px 20px",
-            borderTop: "1px solid var(--color-border)",
-            display: "flex",
-            gap: 10,
+            padding:        "14px 20px",
+            borderTop:      "1px solid var(--color-border)",
+            display:        "flex",
+            gap:            10,
             justifyContent: "flex-end",
-            flexShrink: 0,
+            flexShrink:     0,
           }}
         >
           <button
             onClick={() => setShowFollowUpModal(false)}
             style={{
-              padding: "10px 18px",
+              padding:     "10px 18px",
               borderRadius: 8,
-              background: "none",
-              color: "var(--color-text)",
-              border: "1.5px solid var(--color-border)",
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "'Inter', sans-serif",
+              background:  "none",
+              color:       "var(--color-text)",
+              border:      "1.5px solid var(--color-border)",
+              fontSize:    13,
+              fontWeight:  500,
+              cursor:      "pointer",
+              fontFamily:  "'Inter', sans-serif",
             }}
           >
             Cancel
@@ -616,16 +666,16 @@ export default function FollowUpScheduler() {
             onClick={handleSubmit}
             disabled={saving || !message.trim()}
             style={{
-              padding: "10px 20px",
+              padding:     "10px 20px",
               borderRadius: 8,
-              background: message.trim() ? "#661F1F" : "var(--color-border)",
-              color: message.trim() ? "#fff" : "var(--color-text-secondary)",
-              border: "none",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: message.trim() ? "pointer" : "not-allowed",
-              fontFamily: "'Inter', sans-serif",
-              transition: "all 0.15s",
+              background:  message.trim() ? "#661F1F" : "var(--color-border)",
+              color:       message.trim() ? "#fff" : "var(--color-text-secondary)",
+              border:      "none",
+              fontSize:    13,
+              fontWeight:  600,
+              cursor:      message.trim() ? "pointer" : "not-allowed",
+              fontFamily:  "'Inter', sans-serif",
+              transition:  "all 0.15s",
             }}
           >
             {saving ? "Scheduling..." : `Schedule for ${scheduledDateFormatted}`}
@@ -636,7 +686,7 @@ export default function FollowUpScheduler() {
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
+          50%       { opacity: 0.4; }
         }
       `}</style>
     </>

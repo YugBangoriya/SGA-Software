@@ -1,714 +1,203 @@
-// SGA — Last updated: Fixed two issues:
-//
-// 1. ⚠️ Bug 8.2 — Fixed debouncedTranslateRef stale closure.
-//    Previously the debounced function was created lazily inside the useEffect
-//    with a `!debouncedTranslateRef.current` guard. This meant the single effect
-//    was both initialising AND calling the function, creating a pattern that looks
-//    like a race condition even though React effects don't run concurrently.
-//    More importantly, if the component re-rendered while the debounce was pending,
-//    the old ref could retain a closure over a stale `sourceLang` variable if the
-//    language changed rapidly.
-//
-//    Fix: Split into two separate effects with clear responsibilities:
-//      • Effect 1 (deps: []): Creates the debounced function once at mount. Cancels
-//        any pending call on unmount via the optional .cancel() cleanup.
-//      • Effect 2 (deps: [message, language]): Calls the stable debounced function
-//        whenever message or language changes. Never recreates the function.
-//    Since `sourceLang` is passed as a parameter (not captured in the closure), and
-//    `setTranslations`/`setTranslating` are stable React state setters, this pattern
-//    has zero stale closure risk.
-//
-// 2. Bug (same class as QuotationDetail): `const { currentUser } = useAuth()` always
-//    returned `undefined` because useAuth() has no `currentUser` key — it returns
-//    `{ user, uid, displayName, role, ... }`. Fixed to `const { user: currentUser }`.
-//    This ensures `scheduleFollowUp({ ..., currentUser })` passes the actual Firebase
-//    User object (for `createdBy` audit trail), not undefined.
-//
-// No UI or business logic has been changed.
 /**
- * FollowUpScheduler.jsx
- * Modal for scheduling a follow-up message.
+ * followUpScheduler.js
+ * Firebase Scheduled Cloud Function — runs every day at 09:30 AM IST.
  *
- * Features:
- *   - Date picker (7–15 days from today, or custom date up to 30 days)
- *   - Quick day presets: +7, +10, +14, +15 days
- *   - Language selector (English / Hindi / Gujarati)
- *   - Template picker from saved templates
- *   - Custom message textarea
- *   - Live auto-translate: typing in one language shows translations in the other two
- *   - Preview of what will be sent
- *   - Submit schedules the follow-up in Firestore
+ * WHAT IT DOES:
+ *   1. Queries /followUps for documents where status === 'pending'
+ *      AND scheduledDate <= now
+ *   2. For each pending follow-up, attempts to send via the appropriate
+ *      messaging platform (WhatsApp for automated sends)
+ *   3. Updates the document status to: 'sent' | 'error' | 'api_not_configured' | 'skipped'
+ *
+ * NOTE — WhatsApp API Status:
+ *   The WhatsApp Business API tokens are not yet activated for this deployment.
+ *   Until activation, outbound sends will fail gracefully: the document status
+ *   is set to 'api_not_configured' so no data is lost and retries are possible
+ *   after the API is enabled. Logs record every attempted send.
+ *
+ * NOTE — Issue 4:
+ *   metaSender.js currently reads credentials via functions.config() (v1 style).
+ *   When Issue 4 (firebase-functions upgrade) is completed in a future session,
+ *   metaSender.js will be migrated to process.env secrets (v2 style). No changes
+ *   are needed in this file at that point — the interface is unchanged.
+ *
+ * Deploy: firebase deploy --only functions
  */
 
-import { useState, useEffect, useRef } from "react";
-import useMessagingStore from "../../store/messagingStore";
-import { useAuth } from "../../hooks/useAuth";
-import { translateToLanguages, debounce } from "../../lib/translationApi";
+'use strict';
 
-// Note: `useCallback` was previously imported but unused — removed to keep imports clean.
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { logger }     = require('firebase-functions/v2');
+const admin          = require('firebase-admin');
 
-const LANG_LABELS = { en: "English", hi: "Hindi", gu: "Gujarati" };
-const LANG_FLAGS = { en: "🇬🇧", hi: "🇮🇳", gu: "🇮🇳" };
+const { sendWhatsAppFollowUp } = require('../helpers/metaSender');
 
-// ─── Day preset chip ──────────────────────────────────────────────────────────
-function DayChip({ days, selected, onClick }) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  const label = date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+// ── Process one follow-up document ────────────────────────────────────────────
 
-  return (
-    <button
-      onClick={() => onClick(days)}
-      style={{
-        padding: "6px 12px",
-        borderRadius: 8,
-        border: `1.5px solid ${selected ? "#661F1F" : "var(--color-border)"}`,
-        background: selected ? "#661F1F12" : "var(--color-bg)",
-        color: selected ? "#661F1F" : "var(--color-text)",
-        fontSize: 12,
-        fontWeight: selected ? 600 : 400,
-        cursor: "pointer",
-        fontFamily: "'Inter', sans-serif",
-        textAlign: "center",
-        transition: "all 0.15s",
-      }}
-    >
-      <div style={{ fontWeight: 700 }}>+{days}d</div>
-      <div style={{ fontSize: 10, opacity: 0.7 }}>{label}</div>
-    </button>
-  );
-}
-
-// ─── Translation suggestion box ───────────────────────────────────────────────
-function TranslationSuggestion({ lang, text, onUse, loading }) {
-  if (!text && !loading) return null;
-
-  return (
-    <div
-      style={{
-        padding: "8px 10px",
-        background: "var(--color-bg)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 7,
-        marginTop: 6,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 4,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--color-text-secondary)",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          {LANG_FLAGS[lang]} {LANG_LABELS[lang]} translation
-        </span>
-        {text && (
-          <button
-            onClick={() => onUse(lang, text)}
-            style={{
-              fontSize: 10,
-              color: "#661F1F",
-              background: "#661F1F12",
-              border: "none",
-              borderRadius: 5,
-              padding: "2px 7px",
-              cursor: "pointer",
-              fontWeight: 600,
-              fontFamily: "'Inter', sans-serif",
-            }}
-          >
-            Use this
-          </button>
-        )}
-      </div>
-      {loading ? (
-        <div style={{ height: 16, background: "var(--color-border)", borderRadius: 4, animation: "pulse 1.4s ease-in-out infinite" }} />
-      ) : (
-        <p
-          style={{
-            margin: 0,
-            fontSize: 13,
-            color: "var(--color-text)",
-            lineHeight: 1.5,
-            fontFamily: "'Inter', sans-serif",
-            direction: lang === "hi" || lang === "gu" ? "ltr" : undefined,
-          }}
-        >
-          {text}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ─── Main Component ───────────────────────────────────────────────────────────
-export default function FollowUpScheduler() {
-  // FIX: `useAuth()` returns `{ user, uid, displayName, role, ... }` — it has no
-  // `currentUser` key. Destructuring `currentUser` previously always gave `undefined`,
-  // meaning `scheduleFollowUp({ ..., currentUser: undefined })` silently stored no
-  // creator on scheduled follow-ups. Fixed to `user: currentUser` so the Firebase
-  // User object is correctly passed.
-  const { user: currentUser } = useAuth();
+/**
+ * Attempt to send the follow-up and update the Firestore document status.
+ * Returns: 'sent' | 'error' | 'api_not_configured' | 'skipped'
+ */
+async function processFollowUp(db, docSnap) {
+  const followUp = { id: docSnap.id, ...docSnap.data() };
 
   const {
-    setShowFollowUpModal,
-    scheduleFollowUp,
-    followUpTemplates,
-    getActiveConversation,
-    setShowFirstReplyFollowUpPrompt,
-  } = useMessagingStore();
+    platform     = 'whatsapp',
+    contactId,            // Phone number in E.164 (WA) or platform user ID (IG/FB)
+    customerName = 'Customer',
+    message,
+    language     = 'en',
+  } = followUp;
 
-  const conversation = getActiveConversation();
+  // ── Validate required fields ───────────────────────────────────────────────
+  if (!contactId || !message) {
+    logger.warn(
+      `[FollowUp] ${docSnap.id} — missing contactId or message. Marking as error.`
+    );
+    await docSnap.ref.update({
+      status:       'error',
+      errorReason:  'Missing contactId or message in document',
+      processedAt:  admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return 'error';
+  }
 
-  // ── Form state ──────────────────────────────────────────────────────────────
-  const [selectedDays, setSelectedDays] = useState(7);
-  const [customDate, setCustomDate] = useState("");
-  const [language, setLanguage] = useState("en");
-  const [message, setMessage] = useState("");
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  // ── Platform routing ───────────────────────────────────────────────────────
+  if (platform !== 'whatsapp') {
+    // Instagram and Facebook DMs require the owner to reply live from the inbox.
+    // Automated follow-ups for IG/FB are not supported in this version.
+    logger.info(
+      `[FollowUp] ${docSnap.id} — platform '${platform}' does not support ` +
+      `automated follow-ups. Marking as skipped.`
+    );
+    await docSnap.ref.update({
+      status:       'skipped',
+      skipReason:   `Platform '${platform}' does not support automated follow-up sends`,
+      processedAt:  admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return 'skipped';
+  }
 
-  // ── Translation state ───────────────────────────────────────────────────────
-  const [translations, setTranslations] = useState({ en: "", hi: "", gu: "" });
-  const [translating, setTranslating] = useState(false);
+  // ── Attempt WhatsApp send ──────────────────────────────────────────────────
+  try {
+    await sendWhatsAppFollowUp(contactId, customerName, message, language);
 
-  // ── Debounced translate ref ─────────────────────────────────────────────────
-  // FIX for ⚠️ Bug 8.2 — stale closure:
-  // The debounce function is created ONCE at mount (empty deps []).
-  // `sourceLang` is a PARAMETER to the inner async function, not a closed-over
-  // variable, so it always receives the current language value at call time.
-  // `setTranslations` and `setTranslating` are stable React state setters —
-  // they never change between renders, so there is zero stale closure risk.
-  //
-  // Previously the pattern was:
-  //   useEffect(() => {
-  //     if (!debouncedTranslateRef.current) {   ← lazy init inside the effect
-  //       debouncedTranslateRef.current = debounce(...)
-  //     }
-  //     debouncedTranslateRef.current(message, language)  ← call in same effect
-  //   }, [message, language]);
-  //
-  // The problem: initialisation and invocation were mixed in the same effect.
-  // If translateToLanguages threw and the component re-rendered, the guard
-  // `!debouncedTranslateRef.current` would never re-initialize it (since current
-  // was already set), but the ref's closure over component state was stale.
-  //
-  // New pattern: two effects with separate, clear responsibilities.
-  // ─────────────────────────────────────────────────────────────────────────────
-  const debouncedTranslateRef = useRef(null);
+    await docSnap.ref.update({
+      status:  'sent',
+      sentAt:  admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-  // Effect 1: Create the debounced function exactly once at component mount.
-  // The cleanup cancels any pending debounce call when the component unmounts,
-  // preventing a setState call on an unmounted component.
-  useEffect(() => {
-    debouncedTranslateRef.current = debounce(async (text, sourceLang) => {
-      if (!text.trim()) {
-        setTranslations({ en: "", hi: "", gu: "" });
-        return;
-      }
-      setTranslating(true);
-      try {
-        const targets = ["en", "hi", "gu"].filter((l) => l !== sourceLang);
-        const result = await translateToLanguages(text, targets);
-        setTranslations({ ...result, [sourceLang]: text });
-      } catch {
-        // Translation is a non-critical, API-pending feature — fail silently.
-        // The user can still send a message without auto-translation.
-      } finally {
-        setTranslating(false);
-      }
-    }, 900);
+    logger.info(
+      `[FollowUp] ${docSnap.id} — ✅ Sent via WhatsApp to ${contactId} ` +
+      `(${customerName}, lang: ${language})`
+    );
+    return 'sent';
 
-    // Cancel pending debounce on unmount to prevent setState on unmounted component
-    return () => debouncedTranslateRef.current?.cancel?.();
-  }, []); // Empty deps: create once, never recreate — sourceLang is a parameter
+  } catch (err) {
+    // Distinguish between "API not configured yet" vs a genuine send failure.
+    // A missing token typically surfaces as TypeError or an axios 401/403.
+    const msg = err.message || '';
+    const isApiNotConfigured =
+      msg.includes('undefined') ||
+      msg.toLowerCase().includes('token') ||
+      msg.toLowerCase().includes('config') ||
+      err.response?.status === 401 ||
+      err.response?.status === 403;
 
-  // Effect 2: Trigger translation whenever the message or language changes.
-  // Keeps calling logic separate from initialisation logic.
-  useEffect(() => {
-    if (debouncedTranslateRef.current) {
-      debouncedTranslateRef.current(message, language);
-    }
-  }, [message, language]);
+    const status = isApiNotConfigured ? 'api_not_configured' : 'error';
 
-  // Compute scheduled date from selectedDays or customDate
-  const getScheduledDate = () => {
-    if (customDate) return new Date(customDate);
-    const d = new Date();
-    d.setDate(d.getDate() + selectedDays);
-    d.setHours(9, 0, 0, 0); // 9 AM IST
-    return d;
-  };
+    logger.warn(
+      `[FollowUp] ${docSnap.id} — ` +
+      (isApiNotConfigured
+        ? '⚠️  WhatsApp API not yet configured'
+        : '❌  Send failed') +
+      `: ${msg}`
+    );
 
-  // ── Template selection ──────────────────────────────────────────────────────
-  const handleTemplateSelect = (templateId) => {
-    setSelectedTemplateId(templateId);
-    if (!templateId) return;
-    const tpl = followUpTemplates.find((t) => t.id === templateId);
-    if (!tpl) return;
+    await docSnap.ref.update({
+      status,
+      errorReason:  msg || 'Unknown error',
+      processedAt:  admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-    const langKey = `message${language.charAt(0).toUpperCase() + language.slice(1)}`;
-    const text = tpl[langKey] || tpl.messageEn || "";
-    setMessage(text);
-  };
+    return status;
+  }
+}
 
-  const handleUseTranslation = (lang, text) => {
-    setLanguage(lang);
-    setMessage(text);
-  };
+// ── The Scheduled Function ─────────────────────────────────────────────────────
 
-  // ── Minimum / maximum date constraints ─────────────────────────────────────
-  const minDateStr = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split("T")[0];
-  })();
+/**
+ * Runs every day at 09:30 AM IST.
+ * Firestore composite index required on /followUps:
+ *   (status ASC, scheduledDate ASC)
+ * This index is already present in firestore.indexes.json.
+ */
+exports.followUpScheduler = onSchedule(
+  {
+    schedule:       'every day 09:30',
+    timeZone:       'Asia/Kolkata',
+    region:         'asia-south1',
+    timeoutSeconds: 300,   // 5 minutes — sufficient for typical follow-up volumes
+    memory:         '256MiB',
+  },
+  async (event) => {
+    const db  = admin.firestore();
+    const now = admin.firestore.Timestamp.now();
 
-  const maxDateStr = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().split("T")[0];
-  })();
+    logger.info('[FollowUpScheduler] ─── Daily run starting ───');
 
-  // ── Submit ──────────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
-    if (!message.trim()) {
-      setError("Please enter a follow-up message.");
+    const stats = {
+      total:              0,
+      sent:               0,
+      error:              0,
+      skipped:            0,
+      api_not_configured: 0,
+    };
+
+    // ── Query pending follow-ups due now or earlier ──────────────────────────
+    let snap;
+    try {
+      snap = await db
+        .collection('followUps')
+        .where('status',        '==',  'pending')
+        .where('scheduledDate', '<=', now)
+        .get();
+    } catch (queryErr) {
+      logger.error('[FollowUpScheduler] Firestore query failed:', queryErr.message);
       return;
     }
-    setSaving(true);
-    setError("");
-    try {
-      const scheduledDate = getScheduledDate();
 
-      // Firestore Timestamp requires a Date object
-      const { Timestamp } = await import("firebase/firestore");
-      await scheduleFollowUp({
-        scheduledDate: Timestamp.fromDate(scheduledDate),
-        message: message.trim(),
-        language,
-        templateId: selectedTemplateId || null,
-        currentUser, // now the actual Firebase User object (was undefined before fix)
-      });
+    stats.total = snap.size;
+    logger.info(`[FollowUpScheduler] ${snap.size} pending follow-up(s) due`);
 
-      setShowFirstReplyFollowUpPrompt(false);
-    } catch (err) {
-      console.error("Schedule error:", err);
-      setError("Failed to schedule follow-up. Please try again.");
-    } finally {
-      setSaving(false);
+    if (snap.empty) {
+      logger.info('[FollowUpScheduler] No pending follow-ups — exiting');
+      return;
     }
-  };
 
-  const scheduledDateFormatted = (() => {
-    const d = getScheduledDate();
-    return d.toLocaleDateString("en-IN", {
-      weekday: "short",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+    // ── Process all due follow-ups (parallel — low volume, no rate-limit risk) ─
+    const results = await Promise.allSettled(
+      snap.docs.map((docSnap) => processFollowUp(db, docSnap))
+    );
+
+    results.forEach((result, i) => {
+      const docId = snap.docs[i].id;
+      if (result.status === 'fulfilled') {
+        const outcome = result.value;
+        stats[outcome] = (stats[outcome] || 0) + 1;
+        logger.info(`  → ${docId}: ${outcome}`);
+      } else {
+        stats.error++;
+        logger.error(`  → ${docId}: UNHANDLED EXCEPTION — ${result.reason?.message}`);
+      }
     });
-  })();
 
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={() => setShowFollowUpModal(false)}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.45)",
-          zIndex: 200,
-          backdropFilter: "blur(2px)",
-        }}
-      />
-
-      {/* Modal */}
-      <div
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "min(560px, 95vw)",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          background: "var(--color-card)",
-          borderRadius: 16,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          zIndex: 201,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: "18px 20px 14px",
-            borderBottom: "1px solid var(--color-border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
-          }}
-        >
-          <div>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: 17,
-                fontWeight: 700,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              ⏰ Schedule Follow-Up
-            </h2>
-            <p
-              style={{
-                margin: "3px 0 0",
-                fontSize: 12,
-                color: "var(--color-text-secondary)",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              For{" "}
-              <strong>{conversation?.contactName || "this contact"}</strong> via{" "}
-              {conversation?.platform || "WhatsApp"}
-            </p>
-          </div>
-          <button
-            onClick={() => setShowFollowUpModal(false)}
-            style={{
-              background: "none",
-              border: "none",
-              fontSize: 22,
-              cursor: "pointer",
-              color: "var(--color-text-secondary)",
-              padding: 4,
-              lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
-          {/* ── Date selection ─────────────────────────────────────────────── */}
-          <div>
-            <label
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
-                marginBottom: 8,
-              }}
-            >
-              Send date
-            </label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {[7, 10, 14, 15].map((d) => (
-                <DayChip
-                  key={d}
-                  days={d}
-                  selected={!customDate && selectedDays === d}
-                  onClick={(days) => {
-                    setSelectedDays(days);
-                    setCustomDate("");
-                  }}
-                />
-              ))}
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--color-text-secondary)",
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  Custom:
-                </span>
-                <input
-                  type="date"
-                  min={minDateStr}
-                  max={maxDateStr}
-                  value={customDate}
-                  onChange={(e) => {
-                    setCustomDate(e.target.value);
-                    setSelectedDays(0);
-                  }}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: `1.5px solid ${customDate ? "#661F1F" : "var(--color-border)"}`,
-                    background: "var(--color-bg)",
-                    color: "var(--color-text)",
-                    fontSize: 12,
-                    fontFamily: "'Inter', sans-serif",
-                    outline: "none",
-                  }}
-                />
-              </div>
-            </div>
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 12,
-                color: "#661F1F",
-                fontWeight: 500,
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              📅 Will send on: {scheduledDateFormatted} at 9:00 AM
-            </div>
-          </div>
-
-          {/* ── Template picker ────────────────────────────────────────────── */}
-          {followUpTemplates.length > 0 && (
-            <div>
-              <label
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--color-text)",
-                  fontFamily: "'Inter', sans-serif",
-                  display: "block",
-                  marginBottom: 6,
-                }}
-              >
-                Use a template (optional)
-              </label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => handleTemplateSelect(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "9px 12px",
-                  borderRadius: 8,
-                  border: "1.5px solid var(--color-border)",
-                  background: "var(--color-bg)",
-                  color: "var(--color-text)",
-                  fontSize: 13,
-                  fontFamily: "'Inter', sans-serif",
-                  outline: "none",
-                }}
-              >
-                <option value="">— Select a template —</option>
-                {followUpTemplates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* ── Language selector ──────────────────────────────────────────── */}
-          <div>
-            <label
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
-                marginBottom: 6,
-              }}
-            >
-              Message language
-            </label>
-            <div style={{ display: "flex", gap: 8 }}>
-              {["en", "hi", "gu"].map((lang) => (
-                <button
-                  key={lang}
-                  onClick={() => setLanguage(lang)}
-                  style={{
-                    flex: 1,
-                    padding: "8px 4px",
-                    borderRadius: 8,
-                    border: `1.5px solid ${language === lang ? "#661F1F" : "var(--color-border)"}`,
-                    background: language === lang ? "#661F1F12" : "var(--color-bg)",
-                    color: language === lang ? "#661F1F" : "var(--color-text)",
-                    fontSize: 12,
-                    fontWeight: language === lang ? 700 : 400,
-                    cursor: "pointer",
-                    fontFamily: "'Inter', sans-serif",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {LANG_FLAGS[lang]} {LANG_LABELS[lang]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Message input ──────────────────────────────────────────────── */}
-          <div>
-            <label
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text)",
-                fontFamily: "'Inter', sans-serif",
-                display: "block",
-                marginBottom: 6,
-              }}
-            >
-              Message in {LANG_LABELS[language]} *
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={4}
-              placeholder={
-                language === "en"
-                  ? "Hi {{customer_name}}, just following up on your CNG kit enquiry..."
-                  : language === "hi"
-                  ? "नमस्ते, आपकी CNG किट के बारे में जानकारी के लिए..."
-                  : "નમસ્તે, તમારી CNG કિટ વિશે..."
-              }
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1.5px solid var(--color-border)",
-                background: "var(--color-bg)",
-                color: "var(--color-text)",
-                fontSize: 13,
-                lineHeight: 1.6,
-                resize: "vertical",
-                outline: "none",
-                fontFamily: "'Inter', sans-serif",
-                boxSizing: "border-box",
-                transition: "border-color 0.15s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-              onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-            />
-            <div
-              style={{
-                marginTop: 4,
-                fontSize: 11,
-                color: "var(--color-text-secondary)",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              Tip: As you type, translations will appear below — tap "Use this" to switch
-            </div>
-          </div>
-
-          {/* ── Translation suggestions ────────────────────────────────────── */}
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text-secondary)",
-                fontFamily: "'Inter', sans-serif",
-                marginBottom: 4,
-              }}
-            >
-              🌐 Auto-translation suggestions
-            </div>
-            {["en", "hi", "gu"]
-              .filter((l) => l !== language)
-              .map((lang) => (
-                <TranslationSuggestion
-                  key={lang}
-                  lang={lang}
-                  text={translations[lang]}
-                  loading={translating}
-                  onUse={handleUseTranslation}
-                />
-              ))}
-          </div>
-
-          {/* ── Error ─────────────────────────────────────────────────────── */}
-          {error && (
-            <div
-              style={{
-                padding: "8px 12px",
-                background: "#FFEBEE",
-                border: "1px solid #FFAAAA",
-                borderRadius: 8,
-                fontSize: 13,
-                color: "#CC0000",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            padding: "14px 20px",
-            borderTop: "1px solid var(--color-border)",
-            display: "flex",
-            gap: 10,
-            justifyContent: "flex-end",
-            flexShrink: 0,
-          }}
-        >
-          <button
-            onClick={() => setShowFollowUpModal(false)}
-            style={{
-              padding: "10px 18px",
-              borderRadius: 8,
-              background: "none",
-              color: "var(--color-text)",
-              border: "1.5px solid var(--color-border)",
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "'Inter', sans-serif",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving || !message.trim()}
-            style={{
-              padding: "10px 20px",
-              borderRadius: 8,
-              background: message.trim() ? "#661F1F" : "var(--color-border)",
-              color: message.trim() ? "#fff" : "var(--color-text-secondary)",
-              border: "none",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: message.trim() ? "pointer" : "not-allowed",
-              fontFamily: "'Inter', sans-serif",
-              transition: "all 0.15s",
-            }}
-          >
-            {saving ? "Scheduling..." : `Schedule for ${scheduledDateFormatted}`}
-          </button>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
-    </>
-  );
-}
+    logger.info('[FollowUpScheduler] ─── Run complete ───');
+    logger.info(
+      `  Sent: ${stats.sent} | ` +
+      `Error: ${stats.error} | ` +
+      `Skipped: ${stats.skipped} | ` +
+      `API not configured: ${stats.api_not_configured}`
+    );
+  }
+);
