@@ -9,12 +9,24 @@
  * Configure in Meta Business Manager:
  *   Webhook URL: https://us-central1-YOUR_PROJECT.cloudfunctions.net/whatsappWebhook
  *   Subscribed fields: messages
+ *
+ * Issue 4 migration:
+ *   - Migrated from v1 functions.https.onRequest to v2 onRequest
+ *   - Replaced functions.config() with Secret Manager secrets (process.env)
+ *   - Secrets required (create with firebase functions:secrets:set):
+ *       WHATSAPP_VERIFY_TOKEN (was cfg.whatsapp.verify_token)
+ *       WHATSAPP_APP_SECRET   (was cfg.whatsapp.app_secret)
  */
 
-const functions = require("firebase-functions");
-const crypto = require("crypto");
+const { onRequest }    = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+const crypto           = require("crypto");
 const { upsertConversation, storeMessage, updateMessageStatus, notifyOwner } =
   require("../helpers/messageStore");
+
+// ── Secret declarations (module-level, required by Firebase v2) ───────────────
+const WHATSAPP_VERIFY_TOKEN = defineSecret("WHATSAPP_VERIFY_TOKEN");
+const WHATSAPP_APP_SECRET   = defineSecret("WHATSAPP_APP_SECRET");
 
 // ─── Signature verification ───────────────────────────────────────────────────
 
@@ -78,112 +90,114 @@ function extractMessageContent(msg) {
 
 // ─── Cloud Function ───────────────────────────────────────────────────────────
 
-exports.whatsappWebhook = functions.https.onRequest(async (req, res) => {
-  const cfg = functions.config();
-  const verifyToken = cfg.whatsapp?.verify_token;
-  const appSecret = cfg.whatsapp?.app_secret;
+exports.whatsappWebhook = onRequest(
+  { secrets: [WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET] },
+  async (req, res) => {
+    const verifyToken = WHATSAPP_VERIFY_TOKEN.value();
+    const appSecret   = WHATSAPP_APP_SECRET.value();
 
-  // ── GET: Meta webhook verification ─────────────────────────────────────────
-  if (req.method === "GET") {
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
+    // ── GET: Meta webhook verification ───────────────────────────────────────
+    if (req.method === "GET") {
+      const mode      = req.query["hub.mode"];
+      const token     = req.query["hub.verify_token"];
+      const challenge = req.query["hub.challenge"];
 
-    if (mode === "subscribe" && token === verifyToken) {
-      console.log("WhatsApp webhook verified");
-      return res.status(200).send(challenge);
-    }
-    return res.status(403).send("Verification failed");
-  }
-
-  // ── POST: Incoming event ────────────────────────────────────────────────────
-  if (req.method === "POST") {
-    // Verify signature
-    const signature = req.headers["x-hub-signature-256"];
-    const rawBody = JSON.stringify(req.body);
-
-    if (appSecret && !verifySignature(rawBody, signature, appSecret)) {
-      console.error("WhatsApp webhook: invalid signature");
-      return res.status(401).send("Invalid signature");
+      if (mode === "subscribe" && token === verifyToken) {
+        console.log("WhatsApp webhook verified");
+        return res.status(200).send(challenge);
+      }
+      return res.status(403).send("Verification failed");
     }
 
-    const body = req.body;
+    // ── POST: Incoming event ──────────────────────────────────────────────────
+    if (req.method === "POST") {
+      // Verify signature
+      const signature = req.headers["x-hub-signature-256"];
+      const rawBody   = JSON.stringify(req.body);
 
-    // Confirm it's a WhatsApp event
-    if (body.object !== "whatsapp_business_account") {
-      return res.status(200).send("OK"); // Acknowledge unknown events
-    }
+      const secretConfigured = appSecret && appSecret !== "NOT_CONFIGURED";
+      if (secretConfigured && !verifySignature(rawBody, signature, appSecret)) {
+        console.error("WhatsApp webhook: invalid signature");
+        return res.status(401).send("Invalid signature");
+      }
 
-    // Process each entry (usually just one in production)
-    for (const entry of body.entry || []) {
-      for (const change of entry.changes || []) {
-        if (change.field !== "messages") continue;
+      const body = req.body;
 
-        const value = change.value;
-        const metadata = value.metadata;
-        const contacts = value.contacts || [];
-        const messages = value.messages || [];
-        const statuses = value.statuses || [];
+      // Confirm it's a WhatsApp event
+      if (body.object !== "whatsapp_business_account") {
+        return res.status(200).send("OK"); // Acknowledge unknown events
+      }
 
-        // ── Process inbound messages ────────────────────────────────────────
-        for (const msg of messages) {
-          try {
-            const contactInfo = contacts.find((c) => c.wa_id === msg.from) || {};
-            const contactName = contactInfo.profile?.name || msg.from;
-            const contactPhone = `+${msg.from}`;
+      // Process each entry (usually just one in production)
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          if (change.field !== "messages") continue;
 
-            const { content, messageType, mediaUrl, mediaType } =
-              extractMessageContent(msg);
+          const value    = change.value;
+          const contacts = value.contacts || [];
+          const messages = value.messages || [];
+          const statuses = value.statuses || [];
 
-            // Store / update conversation
-            const conversationId = await upsertConversation({
-              platform: "whatsapp",
-              contactId: contactPhone,
-              contactName,
-              contactPhone,
-              lastMessage: content,
-              direction: "inbound",
-            });
+          // ── Process inbound messages ────────────────────────────────────────
+          for (const msg of messages) {
+            try {
+              const contactInfo = contacts.find((c) => c.wa_id === msg.from) || {};
+              const contactName  = contactInfo.profile?.name || msg.from;
+              const contactPhone = `+${msg.from}`;
 
-            // Store message
-            await storeMessage(conversationId, {
-              platformMessageId: msg.id,
-              content,
-              direction: "inbound",
-              messageType,
-              mediaUrl,
-              mediaType,
-              timestamp: msg.timestamp ? new Date(parseInt(msg.timestamp) * 1000) : null,
-            });
+              const { content, messageType, mediaUrl, mediaType } =
+                extractMessageContent(msg);
 
-            // Notify owner
-            await notifyOwner(contactName, "whatsapp", content, conversationId);
+              // Store / update conversation
+              const conversationId = await upsertConversation({
+                platform: "whatsapp",
+                contactId: contactPhone,
+                contactName,
+                contactPhone,
+                lastMessage: content,
+                direction: "inbound",
+              });
 
-            console.log(`WhatsApp: stored inbound message from ${contactName}`);
-          } catch (err) {
-            console.error("Error processing WhatsApp message:", err.message, err.stack);
+              // Store message
+              await storeMessage(conversationId, {
+                platformMessageId: msg.id,
+                content,
+                direction: "inbound",
+                messageType,
+                mediaUrl,
+                mediaType,
+                timestamp: msg.timestamp ? new Date(parseInt(msg.timestamp) * 1000) : null,
+              });
+
+              // Notify owner
+              await notifyOwner(contactName, "whatsapp", content, conversationId);
+
+              console.log(`WhatsApp: stored inbound message from ${contactName}`);
+            } catch (err) {
+              console.error("Error processing WhatsApp message:", err.message, err.stack);
+            }
           }
-        }
 
-        // ── Process status updates (delivered, read, failed) ────────────────
-        for (const status of statuses) {
-          try {
-            if (!["delivered", "read", "failed"].includes(status.status)) continue;
+          // ── Process status updates (delivered, read, failed) ────────────────
+          for (const status of statuses) {
+            try {
+              if (!["delivered", "read", "failed"].includes(status.status)) continue;
 
-            const contactPhone = `+${status.recipient_id}`;
-            const conversationId = `whatsapp_${contactPhone}`;
+              const contactPhone   = `+${status.recipient_id}`;
+              const conversationId = `whatsapp_${contactPhone}`;
 
-            await updateMessageStatus(conversationId, status.id, status.status);
-          } catch (err) {
-            console.error("Error updating message status:", err.message);
+              await updateMessageStatus(conversationId, status.id, status.status);
+            } catch (err) {
+              console.error("Error updating message status:", err.message);
+            }
           }
         }
       }
+
+      // Always respond 200 quickly — Meta will retry if you don't
+      return res.status(200).send("OK");
     }
 
-    // Always respond 200 quickly — Meta will retry if you don't
-    return res.status(200).send("OK");
+    return res.status(405).send("Method not allowed");
   }
-
-  return res.status(405).send("Method not allowed");
-});
+);

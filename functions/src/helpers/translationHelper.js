@@ -3,10 +3,21 @@
  * Google Cloud Translation API wrapper.
  * Also exports a Firebase HTTP-callable function used by the frontend
  * to get translation suggestions while the owner types a follow-up message.
+ *
+ * Issue 4 migration:
+ *   - Migrated from v1 onCall(data, context) to v2 onCall(request)
+ *   - Replaced functions.config().google.translation_api_key with
+ *     process.env.GOOGLE_TRANSLATION_API_KEY (Secret Manager)
+ *   - Secret must be created:
+ *       firebase functions:secrets:set GOOGLE_TRANSLATION_API_KEY
  */
 
 const axios = require("axios");
-const functions = require("firebase-functions");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret }       = require("firebase-functions/params");
+
+// ── Secret declaration (module-level, required by Firebase v2) ────────────────
+const GOOGLE_TRANSLATION_API_KEY = defineSecret("GOOGLE_TRANSLATION_API_KEY");
 
 /**
  * Translates text using Google Cloud Translation API v3.
@@ -19,8 +30,10 @@ const functions = require("firebase-functions");
 async function translateText(text, targetLang, sourceLang = null) {
   if (!text || !text.trim()) return "";
 
-  const apiKey = functions.config().google?.translation_api_key;
-  if (!apiKey) {
+  // Issue 4 migration: reads from process.env after the calling function
+  // (translateMessage) injects the secret via its secrets option.
+  const apiKey = process.env.GOOGLE_TRANSLATION_API_KEY;
+  if (!apiKey || apiKey === "NOT_CONFIGURED") {
     console.warn("Google Translation API key not configured");
     return text;
   }
@@ -43,7 +56,7 @@ async function translateText(text, targetLang, sourceLang = null) {
 }
 
 /**
- * Firebase HTTP-callable function.
+ * Firebase HTTP-callable function (v2).
  * Called from the React frontend to translate follow-up message drafts.
  *
  * Input:  { text: string, targetLanguages: string[] }
@@ -53,61 +66,64 @@ async function translateText(text, targetLang, sourceLang = null) {
  *
  * Auth: must be signed in with owner or superadmin role.
  */
-const translateMessage = functions.https.onCall(async (data, context) => {
-  // Require authentication
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "You must be signed in to use translation."
-    );
-  }
-
-  // Only owner and superadmin can use this feature
-  const role = context.auth.token.role;
-  if (role !== "owner" && role !== "superadmin") {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Only Owner and SuperAdmin can use translation."
-    );
-  }
-
-  const { text, targetLanguages } = data;
-
-  if (!text || typeof text !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "text must be a non-empty string.");
-  }
-
-  if (!Array.isArray(targetLanguages) || targetLanguages.length === 0) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "targetLanguages must be a non-empty array."
-    );
-  }
-
-  // Validate language codes
-  const allowed = ["en", "hi", "gu"];
-  for (const lang of targetLanguages) {
-    if (!allowed.includes(lang)) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        `Unsupported language: ${lang}. Must be one of: en, hi, gu`
+const translateMessage = onCall(
+  { secrets: [GOOGLE_TRANSLATION_API_KEY] },
+  async (request) => {
+    // Require authentication
+    if (!request.auth) {
+      throw new HttpsError(
+        "unauthenticated",
+        "You must be signed in to use translation."
       );
     }
-  }
 
-  try {
-    const results = await Promise.all(
-      targetLanguages.map(async (lang) => {
-        const translated = await translateText(text, lang);
-        return [lang, translated];
-      })
-    );
+    // Only owner and superadmin can use this feature
+    const role = request.auth.token.role;
+    if (role !== "owner" && role !== "superadmin") {
+      throw new HttpsError(
+        "permission-denied",
+        "Only Owner and SuperAdmin can use translation."
+      );
+    }
 
-    return { translations: Object.fromEntries(results) };
-  } catch (err) {
-    console.error("Translation error:", err.message);
-    throw new functions.https.HttpsError("internal", "Translation failed. Please try again.");
+    const { text, targetLanguages } = request.data;
+
+    if (!text || typeof text !== "string") {
+      throw new HttpsError("invalid-argument", "text must be a non-empty string.");
+    }
+
+    if (!Array.isArray(targetLanguages) || targetLanguages.length === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "targetLanguages must be a non-empty array."
+      );
+    }
+
+    // Validate language codes
+    const allowed = ["en", "hi", "gu"];
+    for (const lang of targetLanguages) {
+      if (!allowed.includes(lang)) {
+        throw new HttpsError(
+          "invalid-argument",
+          `Unsupported language: ${lang}. Must be one of: en, hi, gu`
+        );
+      }
+    }
+
+    try {
+      const results = await Promise.all(
+        targetLanguages.map(async (lang) => {
+          const translated = await translateText(text, lang);
+          return [lang, translated];
+        })
+      );
+
+      return { translations: Object.fromEntries(results) };
+    } catch (err) {
+      console.error("Translation error:", err.message);
+      throw new HttpsError("internal", "Translation failed. Please try again.");
+    }
   }
-});
+);
 
 module.exports = { translateMessage, translateText };

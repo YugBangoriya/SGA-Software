@@ -183,6 +183,9 @@ async function updateMessageStatus(conversationId, platformMessageId, status) {
  * Sends a push notification to the owner when a new inbound message arrives.
  * Uses Firebase Cloud Messaging. Owner's FCM token must be stored in /users/{ownerUid}.
  *
+ * Set OWNER_UID in functions/.env (non-secret environment variable):
+ *   OWNER_UID=<firebase_uid_of_owner>
+ *
  * @param {string} contactName
  * @param {string} platform
  * @param {string} messagePreview
@@ -190,8 +193,9 @@ async function updateMessageStatus(conversationId, platformMessageId, status) {
  */
 async function notifyOwner(contactName, platform, messagePreview, conversationId) {
   try {
-    const ownerUid = process.env.OWNER_UID ||
-      (require("firebase-functions").config().app || {}).owner_uid;
+    // Issue 4 migration: removed functions.config() fallback.
+    // Set OWNER_UID in functions/.env — if not set, notifications are silently skipped.
+    const ownerUid = process.env.OWNER_UID;
 
     if (!ownerUid) return;
 

@@ -7,26 +7,29 @@
  *
  * All three platforms use Meta's Graph API under the hood,
  * but with different endpoints and payload shapes.
+ *
+ * Issue 4 migration: replaced functions.config() with process.env.
+ * The calling function MUST declare the relevant secrets in its options:
+ *   WhatsApp sends  → WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID
+ *   Instagram sends → META_INSTAGRAM_TOKEN
+ *   Facebook sends  → META_PAGE_ACCESS_TOKEN
  */
 
 const axios = require("axios");
-const functions = require("firebase-functions");
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
 function getWhatsAppConfig() {
-  const cfg = functions.config();
   return {
-    token: cfg.whatsapp?.token,
-    phoneNumberId: cfg.whatsapp?.phone_number_id,
+    token: process.env.WHATSAPP_ACCESS_TOKEN,
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   };
 }
 
 function getMetaConfig() {
-  const cfg = functions.config();
   return {
-    pageAccessToken: cfg.meta?.page_access_token,
-    instagramToken: cfg.meta?.instagram_token,
+    pageAccessToken: process.env.META_PAGE_ACCESS_TOKEN,
+    instagramToken: process.env.META_INSTAGRAM_TOKEN,
   };
 }
 
