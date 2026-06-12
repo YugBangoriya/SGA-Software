@@ -82,7 +82,7 @@ Installable via browser on Android and iOS with Add to Home Screen. Service work
 | React Hook Form + Zod | Forms & Validation | RHF v7.7 / Zod v4.3 | Type-safe form handling across all modules |
 | Firebase SDK | BaaS Platform | v12.1 | Auth, Firestore, Storage, Functions, Hosting, FCM |
 | Cloud Firestore | Database | v12 | Primary data store — 14 collections |
-| Firebase Cloud Functions | Serverless Backend | v2 (Node.js) | Business logic, scheduling, webhook processing |
+| Firebase Cloud Functions | Serverless Backend | Node.js 22, 2nd Gen (Cloud Run) | Business logic, scheduling, webhook processing |
 | @react-pdf/renderer | PDF Generation | v4.5 | Client-side invoice and quotation PDFs |
 | Recharts | Data Visualisation | v3.8 | Profit/Loss and reporting charts |
 | i18next + react-i18next | Internationalisation | v26 / v17 | English and Gujarati language support |
@@ -104,6 +104,12 @@ Installable via browser on Android and iOS with Add to Home Screen. Service work
 | **Client Delivery** | ✅ Delivered — actively used |
 | **Post-Deployment Maintenance** | ✅ Ongoing — features added based on client feedback |
 | **External API Activation** | 🔶 Pending client decision (WhatsApp, Instagram, Facebook) |
+
+---
+
+## Recent Updates
+
+**June 2026 —** The Cloud Functions backend was upgraded to `firebase-functions` v7.2.5, with all functions migrated to **Node.js 22, 2nd Generation (Cloud Run)**. This completes the post-deployment maintenance cycle: all four issues identified after initial deployment — the reminder-scheduler document dependency, the Secret Manager migration for API credentials, the Node.js runtime upgrade, and the firebase-functions v7 upgrade itself — are now fully resolved, deployed, and verified in production. As with the original deployment, the Cloud Functions configuration relies on a `functions/.env` file and Secret Manager secrets, neither of which are committed to version control.
 
 ---
 
