@@ -1,4 +1,9 @@
-// SGA — Last updated: Invoice naming changed to INV-DD-MM-YYYY-XXX / RETURN-INV-DD-MM-YYYY-XXX; deleteAllInvoices now excludes pending-payment invoices
+// SGA — Last updated: Three fixes — (1) loadSettings() path corrected from /settings/business
+// to /settings/main so businessSettings/gstNumber/logo/address/phone populate on Invoice PDFs;
+// (2) subscribeSystemConfig() path corrected from systemConfig/global to systemConfig/main so
+// the DB-lock state in invoiceStore actually reflects SuperAdmin's lock toggle; (3) invoice
+// numbering (INV-DD-MM-YYYY-XXX / RETURN-INV-DD-MM-YYYY-XXX) now uses the invoice's own
+// (possibly back-dated/overridden) date instead of always using today's creation date.
 // ============================================================
 // invoiceStore.js — Zustand store for Invoice Module
 // Phase 4 — Shree Ganesh Automobile
@@ -40,10 +45,24 @@ function getTodayDDMMYYYY() {
   return `${dd}-${mm}-${yyyy}`;
 }
 
+// ── Date helper: converts a "YYYY-MM-DD" date string (as produced by
+// <input type="date">) to "DD-MM-YYYY". Falls back to today's date if
+// the value is missing or not in the expected format. Used so invoice
+// numbering is based on the invoice's own (possibly back-dated) date,
+// not the date the record was created. ──────────────────────────────
+function toDDMMYYYY(dateStr) {
+  if (typeof dateStr === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [yyyy, mm, dd] = dateStr.split("-");
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  return getTodayDDMMYYYY();
+}
+
 // Generate sequential invoice number: INV-DD-MM-YYYY-XXX
-// Serial number resets each day based on that day's invoices
-async function generateInvoiceNumber() {
-  const dateStr = getTodayDDMMYYYY(); // e.g. "28-05-2026"
+// Date used is the invoice's own (possibly back-dated/overridden) invoiceDate,
+// NOT the date the record is created. Serial number resets per that date.
+async function generateInvoiceNumber(invoiceDateStr) {
+  const dateStr = toDDMMYYYY(invoiceDateStr); // e.g. "02-04-2026"
   const prefix  = `INV-${dateStr}-`;
 
   // Query all invoices to find those from today with our prefix
@@ -68,8 +87,8 @@ async function generateInvoiceNumber() {
 }
 
 // Generate return invoice number: RETURN-INV-DD-MM-YYYY-XXX
-async function generateReturnInvoiceNumber() {
-  const dateStr = getTodayDDMMYYYY();
+async function generateReturnInvoiceNumber(returnDateStr) {
+  const dateStr = toDDMMYYYY(returnDateStr);
   const prefix  = `RETURN-INV-${dateStr}-`;
 
   const q = query(
@@ -117,7 +136,7 @@ const useInvoiceStore = create((set, get) => ({
   // ── system config / DB lock ────────────────────────────────
   subscribeSystemConfig: () => {
     const unsub = onSnapshot(
-      doc(db, SYSTEM_CONFIG_COLLECTION, "global"),
+      doc(db, SYSTEM_CONFIG_COLLECTION, "main"),
       (snap) => {
         if (snap.exists()) {
           const data = snap.data();
@@ -133,10 +152,10 @@ const useInvoiceStore = create((set, get) => ({
     return unsub;
   },
 
-  // ── load settings (GST) ────────────────────────────────────
+  // ── load settings (GST, business info) ─────────────────────
   loadSettings: async () => {
     try {
-      const snap = await getDoc(doc(db, SETTINGS_COLLECTION, "business"));
+      const snap = await getDoc(doc(db, SETTINGS_COLLECTION, "main"));
       if (snap.exists()) {
         const data = snap.data();
         set({
@@ -205,7 +224,7 @@ const useInvoiceStore = create((set, get) => ({
 
     set({ loading: true, error: null });
     try {
-      const invoiceNo = await generateInvoiceNumber();
+      const invoiceNo = await generateInvoiceNumber(invoiceData.invoiceDate);
       const createdByName =
         currentUser.displayName ||
         currentUser.email ||
@@ -384,7 +403,7 @@ const useInvoiceStore = create((set, get) => ({
     if (!currentUser) throw new Error("Authentication error.");
     set({ loading: true, error: null });
     try {
-      const invoiceNo = await generateReturnInvoiceNumber();
+      const invoiceNo = await generateReturnInvoiceNumber(invoiceData.returnDate);
       const createdByName = currentUser.displayName || currentUser.email || currentUser.uid || "Unknown";
       const returnItems = invoiceData.returnItems || [];
       const totalReturnAmount = parseFloat(

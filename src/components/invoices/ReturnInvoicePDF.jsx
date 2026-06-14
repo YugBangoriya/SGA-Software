@@ -1,4 +1,7 @@
-// SGA — Last updated: New file — PDF template for Return Invoices (RET_INV format)
+// SGA — Last updated: Fixed business settings field names to match /settings/main schema —
+// businessLogoUrl (was hardcoded LOGO_BASE64; kept as fallback), businessName (now dynamic),
+// businessPhone (was biz.phone), businessAddress (was biz.address),
+// invoiceTermsAndConditions (was biz.termsAndConditions). Phone now shows in header (Feature 1).
 // ============================================================
 // ReturnInvoicePDF.jsx — @react-pdf/renderer Return Invoice Template
 // Shree Ganesh Automobile
@@ -130,7 +133,7 @@ export default function ReturnInvoicePDFDocument({ invoice, businessSettings }) 
   const customer = invoice.customerSnapshot || {};
   const returnItems = invoice.returnItems || [];
   const totalReturnAmount = parseFloat(invoice.totalReturnAmount || 0);
-  const terms = biz.termsAndConditions || DEFAULT_TERMS;
+  const terms = biz.invoiceTermsAndConditions || DEFAULT_TERMS;
 
   return (
     <Document title={invoice.invoiceNo || "Return Invoice"} author="Shree Ganesh Automobile" subject="Return Invoice">
@@ -139,13 +142,18 @@ export default function ReturnInvoicePDFDocument({ invoice, businessSettings }) 
         {/* ── HEADER ── */}
         <View style={styles.headerRow}>
           <View style={styles.logoBox}>
-            <Image src={LOGO_BASE64} style={styles.logo} />
+            <Image
+              src={biz.businessLogoUrl || LOGO_BASE64}
+              style={styles.logo}
+            />
           </View>
           <View style={styles.businessInfo}>
-            <Text style={styles.businessName}>Shree Ganesh Automobile</Text>
+            <Text style={styles.businessName}>
+              {biz.businessName || "Shree Ganesh Automobile"}
+            </Text>
             <Text style={[styles.businessDetail, { color: C.primaryLight, letterSpacing: 1 }]}>CNG Kit Installation Specialists</Text>
-            {biz.address && <Text style={styles.businessDetail}>{biz.address}</Text>}
-            {biz.phone && <Text style={styles.businessDetail}>Ph: {biz.phone}</Text>}
+            {biz.businessPhone && <Text style={styles.businessDetail}>Ph: {biz.businessPhone}</Text>}
+            {biz.businessAddress && <Text style={styles.businessDetail}>{biz.businessAddress}</Text>}
           </View>
           <View style={styles.invoiceTitleBox}>
             <Text style={styles.invoiceTitle}>RETURN INVOICE</Text>

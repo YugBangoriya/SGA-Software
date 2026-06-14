@@ -1,4 +1,9 @@
-// SGA — Last updated: Added deleteCustomer action for individual record deletion feature
+// SGA — Last updated: Fixed loadSettings() — dropdown values configured in Settings → Dropdown
+// Values (DropdownManager) are stored under settings.dropdowns.{category} in /settings/main,
+// but loadSettings was reading non-existent top-level settings.{category} fields, so Customer
+// Creation always fell back to hardcoded defaults regardless of Owner-configured options.
+// Now correctly reads settings.dropdowns.cngKitBrands/addOns/advancers/technicianNames/
+// vehicleEmissionCategories (with key remapping for technicians/emissionCategories).
 /**
  * customerStore.js
  * Zustand store for the Customer Records module.
@@ -82,16 +87,17 @@ const useCustomerStore = create((set, get) => ({
         fetchSettings(),
         fetchCustomFields(),
       ]);
+      const dd = settings?.dropdowns || {};
       set({
         dropdownOptions: settings
           ? {
-              cngKitBrands:       settings.cngKitBrands       || DEFAULT_DROPDOWN_OPTIONS.cngKitBrands,
-              cngKitModels:       settings.cngKitModels       || DEFAULT_DROPDOWN_OPTIONS.cngKitModels,
-              tankCapacities:     settings.tankCapacities     || DEFAULT_DROPDOWN_OPTIONS.tankCapacities,
-              advancers:          settings.advancers          || DEFAULT_DROPDOWN_OPTIONS.advancers,
-              addOns:             settings.addOns             || DEFAULT_DROPDOWN_OPTIONS.addOns,
-              technicians:        settings.technicians        || DEFAULT_DROPDOWN_OPTIONS.technicians,
-              emissionCategories: settings.emissionCategories || DEFAULT_DROPDOWN_OPTIONS.emissionCategories,
+              cngKitBrands:       dd.cngKitBrands           || DEFAULT_DROPDOWN_OPTIONS.cngKitBrands,
+              cngKitModels:       DEFAULT_DROPDOWN_OPTIONS.cngKitModels,       // brand-keyed structure — not managed via Settings → Dropdown Values
+              tankCapacities:     DEFAULT_DROPDOWN_OPTIONS.tankCapacities,     // not part of Settings → Dropdown Values categories
+              advancers:          dd.advancers              || DEFAULT_DROPDOWN_OPTIONS.advancers,
+              addOns:             dd.addOns                 || DEFAULT_DROPDOWN_OPTIONS.addOns,
+              technicians:        dd.technicianNames        || DEFAULT_DROPDOWN_OPTIONS.technicians,
+              emissionCategories: dd.vehicleEmissionCategories || DEFAULT_DROPDOWN_OPTIONS.emissionCategories,
             }
           : DEFAULT_DROPDOWN_OPTIONS,
         customFields:      customFields || [],

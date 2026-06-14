@@ -1,4 +1,6 @@
-// SGA — Last updated: Added isPendingPayment prop for distinct teal/blue highlight on partial-payment invoices; different color from return invoice (burgundy-rose) highlight
+// SGA — Last updated: Feature 2 — when invoice date is manually overridden (isDateOverridden),
+// the card now also shows the original creation date in muted text below the invoice date,
+// so staff can see both at a glance in the list view without opening the detail page.
 // ============================================================
 // InvoiceCard.jsx — Invoice list card with status, date flag
 // Phase 4 — Shree Ganesh Automobile
@@ -170,20 +172,27 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
 
       {/* Bottom row: date + amount + chevron */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <Calendar
-            size={12}
-            color={invoice.isDateOverridden ? "#CC6600" : textSecondary}
-          />
-          <span
-            style={{
-              fontSize:   12,
-              color:      invoice.isDateOverridden ? "#CC6600" : textSecondary,
-              fontWeight: invoice.isDateOverridden ? 600 : 400,
-            }}
-          >
-            {formatDate(invoice.invoiceDate)}
-          </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Calendar
+              size={12}
+              color={invoice.isDateOverridden ? "#CC6600" : textSecondary}
+            />
+            <span
+              style={{
+                fontSize:   12,
+                color:      invoice.isDateOverridden ? "#CC6600" : textSecondary,
+                fontWeight: invoice.isDateOverridden ? 600 : 400,
+              }}
+            >
+              {formatDate(invoice.invoiceDate)}
+            </span>
+          </div>
+          {invoice.isDateOverridden && invoice.createdAt && (
+            <span style={{ fontSize: 10, color: "#999", paddingLeft: 18 }}>
+              Created: {formatDate(invoice.createdAt)}
+            </span>
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>

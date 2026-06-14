@@ -1,6 +1,8 @@
-// SGA — Last updated: Fixed PDF generation failure — replaced external Google Fonts URL registration
-//   with built-in Helvetica/Courier fonts (same approach as InvoicePDF.jsx). External Font.register()
-//   calls were causing network failures that crashed the entire PDF render pipeline.
+// SGA — Last updated: Fixed business settings field names to match /settings/main schema —
+//   businessLogoUrl (was logoUrl), businessAddress (was address), businessPhone (was phone),
+//   instagramUrl/facebookUrl/googleMapsUrl (was nested socialLinks.*). Added phone number
+//   display below business name in header. Standardized date format to short month
+//   (DD Mon YYYY) to match QuotationList.jsx and the Invoice module.
 // src/pages/quotations/QuotationPDF.jsx
 // Phase 5 — Quotation Module
 // PDF layout using @react-pdf/renderer.
@@ -374,7 +376,7 @@ function formatDate(ts) {
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString("en-IN", {
     day: "2-digit",
-    month: "long",
+    month: "short",
     year: "numeric",
   });
 }
@@ -403,14 +405,17 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
         {/* ── HEADER ── */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            {settings.logoUrl ? (
-              <Image src={settings.logoUrl} style={styles.businessLogo} />
+            {settings.businessLogoUrl ? (
+              <Image src={settings.businessLogoUrl} style={styles.businessLogo} />
             ) : null}
             <Text style={styles.businessName}>
               {settings.businessName || "Shree Ganesh Automobile"}
             </Text>
-            {settings.address ? (
-              <Text style={styles.businessSubInfo}>{settings.address}</Text>
+            {settings.businessPhone ? (
+              <Text style={styles.businessSubInfo}>Ph: {settings.businessPhone}</Text>
+            ) : null}
+            {settings.businessAddress ? (
+              <Text style={styles.businessSubInfo}>{settings.businessAddress}</Text>
             ) : null}
             {settings.gstNumber ? (
               <Text style={styles.businessSubInfo}>
@@ -631,33 +636,33 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
         <View style={styles.socialSection}>
           <Text style={styles.socialTitle}>Connect With Us</Text>
           <View style={styles.socialRow}>
-            {settings.socialLinks?.instagram && (
+            {settings.instagramUrl && (
               <View style={styles.socialLinkWrap}>
                 <Text style={styles.socialPlatform}>Instagram:</Text>
                 <Link
-                  src={settings.socialLinks.instagram}
+                  src={settings.instagramUrl}
                   style={styles.socialLink}
                 >
-                  {settings.socialLinks.instagram}
+                  {settings.instagramUrl}
                 </Link>
               </View>
             )}
-            {settings.socialLinks?.facebook && (
+            {settings.facebookUrl && (
               <View style={styles.socialLinkWrap}>
                 <Text style={styles.socialPlatform}>Facebook:</Text>
                 <Link
-                  src={settings.socialLinks.facebook}
+                  src={settings.facebookUrl}
                   style={styles.socialLink}
                 >
-                  {settings.socialLinks.facebook}
+                  {settings.facebookUrl}
                 </Link>
               </View>
             )}
-            {settings.socialLinks?.googleMaps && (
+            {settings.googleMapsUrl && (
               <View style={styles.socialLinkWrap}>
                 <Text style={styles.socialPlatform}>Location:</Text>
                 <Link
-                  src={settings.socialLinks.googleMaps}
+                  src={settings.googleMapsUrl}
                   style={styles.socialLink}
                 >
                   Find us on Google Maps
@@ -671,7 +676,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
         <View style={styles.footer} fixed>
           <Text style={styles.footerLeft}>
             {settings.businessName || "Shree Ganesh Automobile"} |{" "}
-            {settings.phone || ""}
+            {settings.businessPhone || ""}
           </Text>
           <Text style={styles.footerRight}>{quotation.quotationNumber}</Text>
         </View>

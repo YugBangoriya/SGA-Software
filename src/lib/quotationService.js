@@ -1,4 +1,4 @@
-// SGA — Last updated: Added deleteQuotation function for individual deletion feature
+// SGA — Last updated: Fixed fetchBusinessSettings() — was reading from non-existent /settings/business doc, always returning null; corrected to /settings/main (the canonical settings document), fixing empty "Connect With Us" and logo/phone/GST sections in Quotation PDFs
 // src/lib/quotationService.js
 // Phase 5 — Quotation Module
 // All Firestore, Storage, and Cloud Function operations for quotations.
@@ -253,7 +253,7 @@ export async function fetchCarRepository() {
 // ─── Fetch Business Settings ───────────────────────────────────────────────────
 
 export async function fetchBusinessSettings() {
-  const snap = await getDoc(doc(db, "settings", "business"));
+  const snap = await getDoc(doc(db, "settings", "main"));
   if (!snap.exists()) return null;
   return snap.data();
 }

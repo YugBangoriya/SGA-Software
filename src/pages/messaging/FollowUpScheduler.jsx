@@ -288,7 +288,7 @@ export default function FollowUpScheduler() {
     return d.toLocaleDateString("en-IN", {
       weekday: "short",
       day:     "numeric",
-      month:   "long",
+      month:   "short",
       year:    "numeric",
     });
   })();

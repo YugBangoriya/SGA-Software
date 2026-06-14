@@ -1,6 +1,6 @@
-// SGA — Last updated: Fixed 🔴 Bug A — replaced `const { currentUser } = useAuth()` (always
-// undefined, since useAuth() has no `currentUser` key) with `const { uid: currentUserUid } = useAuth()`.
-// Added a null-guard in handleSendWhatsApp so that if the session has expired mid-form,
+// SGA — Last updated: Feature 3 — standardized formatDate() from month:'long' (e.g. "02 April 2026")
+// to month:'short' (e.g. "02 Apr 2026") so dates match QuotationList.jsx, QuotationPDF.jsx, and
+// the Invoice module across the app.
 // the component shows a clear error instead of crashing with "Cannot read properties of undefined".
 // No other behaviour or UI has been changed.
 //
@@ -34,7 +34,7 @@ function formatINR(n) {
 function formatDate(ts) {
   if (!ts) return "—";
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 function formatDateTime(ts) {
   if (!ts) return "—";

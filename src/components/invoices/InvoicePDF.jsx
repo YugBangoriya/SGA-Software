@@ -1,4 +1,8 @@
-// SGA — Last updated: Added discount support in PDF (Invoice Total + Discount + Revised Total when discount > 0; only Invoice Total when no discount)
+// SGA — Last updated: Fixed business settings field names to match /settings/main schema —
+// businessLogoUrl (was hardcoded LOGO_BASE64 fallback added), businessName (now dynamic),
+// businessPhone (was biz.phone), businessAddress (was biz.address),
+// invoiceTermsAndConditions (was biz.termsAndConditions). Phone now displays below
+// business name in the header (Feature 1).
 // ============================================================
 // InvoicePDF.jsx — @react-pdf/renderer Invoice Template
 // Phase 4 — Shree Ganesh Automobile
@@ -427,7 +431,7 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
   const displayStatus =
     invoice.status === "PENDING" ? "PENDING" : invoice.paymentStatus || "UNPAID";
   const statusSt = getStatusStyle(displayStatus);
-  const terms = biz.termsAndConditions || DEFAULT_TERMS;
+  const terms = biz.invoiceTermsAndConditions || DEFAULT_TERMS;
 
   return (
     <Document
@@ -440,16 +444,21 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
         {/* ── HEADER ─────────────────────────────────────── */}
         <View style={styles.headerRow}>
           <View style={styles.logoBox}>
-            <Image src={LOGO_BASE64} style={styles.logo} />
+            <Image
+              src={biz.businessLogoUrl || LOGO_BASE64}
+              style={styles.logo}
+            />
           </View>
           <View style={styles.businessInfo}>
-            <Text style={styles.businessName}>Shree Ganesh Automobile</Text>
+            <Text style={styles.businessName}>
+              {biz.businessName || "Shree Ganesh Automobile"}
+            </Text>
             <Text style={styles.businessTagline}>CNG Kit Installation Specialists</Text>
-            {biz.address && (
-              <Text style={styles.businessDetail}>{biz.address}</Text>
+            {biz.businessPhone && (
+              <Text style={styles.businessDetail}>Ph: {biz.businessPhone}</Text>
             )}
-            {biz.phone && (
-              <Text style={styles.businessDetail}>Ph: {biz.phone}</Text>
+            {biz.businessAddress && (
+              <Text style={styles.businessDetail}>{biz.businessAddress}</Text>
             )}
             {gstEnabled && biz.gstNumber && (
               <Text style={styles.businessDetail}>GSTIN: {biz.gstNumber}</Text>

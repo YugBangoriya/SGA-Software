@@ -1,8 +1,7 @@
-// SGA — Last updated: Addressed ⚠️ Bug 5.2 — Added an explicit pre-submit null-user guard
-// in handleSubmit. If `user` is null at submission time (e.g. session expired mid-form),
-// the function now shows a clear error message and exits early instead of silently writing
-// an invoice with an empty creatorUid. The optional chaining `user?.uid || ""` that was
-// already there prevents a crash, but the new guard provides a visible UX error.
+// SGA — Last updated: Fixed Car Repository company dropdown — corrected field name from
+// non-existent 'company.company' to 'company.name' (matches carRepositoryService.js schema),
+// so Vehicle Company options in Quotation creation are now selectable and sync correctly
+// with the Car Repository.
 // src/components/quotations/CreateQuotationForm.jsx
 // Phase 5 — Quotation Module
 // Multi-step quotation creation form. Owner-only.
@@ -133,7 +132,7 @@ export default function CreateQuotationForm() {
   const [saveError, setSaveError] = useState(null);
 
   // Car Repository data
-  const [carRepo, setCarRepo]               = useState([]);  // [{id, company, models:[{name,driveLink,reelLinks}]}]
+  const [carRepo, setCarRepo]               = useState([]);  // [{id, name, models:[{name,driveLink,reelLinks}]}]
   const [carLoading, setCarLoading]         = useState(true);
   const [selectedCompanyData, setSelectedCompanyData] = useState(null);
 
@@ -197,7 +196,7 @@ export default function CreateQuotationForm() {
       carReelLinks: [],
       isManualVehicle: company === "__not_in_list__",
     });
-    const found = carRepo.find((c) => c.company === company);
+    const found = carRepo.find((c) => c.name === company);
     setSelectedCompanyData(found || null);
     setErrors((prev) => ({ ...prev, vehicleCompany: undefined, vehicleModel: undefined }));
   };
@@ -445,8 +444,8 @@ export default function CreateQuotationForm() {
                     >
                       <option value="">Select vehicle company…</option>
                       {carRepo.map((company) => (
-                        <option key={company.id} value={company.company}>
-                          {company.company}
+                        <option key={company.id} value={company.name}>
+                          {company.name}
                         </option>
                       ))}
                       <option value="__not_in_list__">⚠ Not in list (enter manually)</option>

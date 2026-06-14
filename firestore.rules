@@ -1,6 +1,6 @@
-// SGA — Last updated: Bug Fix #4 — invoiceDbLocked() now uses exists() guard before .data access; prevents NullPointerException when systemConfig/main doc is absent, which was denying Owner invoice reads and causing all dashboard stats to show 0
+// SGA — Last updated: Added explicit rule for /notifications collection (Bug 2 fix) — previously fell under the default-deny catch-all, causing "Failed to save quotation" errors for manual-vehicle-entry quotations even though the quotation itself saved successfully
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.2 | Post-Launch Fix
+// Version: 1.3 | Post-Launch Fix
 //
 // ── CHANGES FROM v1.1 ────────────────────────────────────────────────────
 //   FIX 4 — /inventory/{itemId}/restockHistory subcollection had NO rule.
@@ -244,6 +244,17 @@ service cloud.firestore {
       allow read:           if isOwnerOrAbove();
       allow create, update: if isOwnerOrAbove();
       allow delete:         if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /notifications — SuperAdmin alerts (e.g. car model not in
+    // Car Repository, used during Quotation creation)
+    // ──────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read:   if isOwnerOrAbove();
+      allow create: if isOwnerOrAbove();
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
