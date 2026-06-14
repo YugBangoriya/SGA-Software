@@ -1,4 +1,8 @@
-// SGA — Last updated: All fields made optional — name, phone, vehicleNo are no longer required fields (client request)
+// SGA — Last updated: Fixed hardcoded emission categories in Step2 — was using a static
+// ['BS3','BS4','BS6','BS6 Phase 2'] array instead of opts.emissionCategories loaded from
+// settings.dropdowns.vehicleEmissionCategories via customerStore. Step2 now receives opts
+// as a prop and reads opts.emissionCategories || [] so emission category options stay in
+// sync with whatever the Owner configures in Settings → Dropdowns.
 /**
  * CustomerForm.jsx
  * Multi-step form for creating and editing customer records.
@@ -305,7 +309,7 @@ export default function CustomerForm({ mode = 'create' }) {
       {/* ── Form body ──────────────────────────────────────────────────── */}
       <div style={{ padding: '20px 16px 120px', maxWidth: 640, margin: '0 auto' }}>
         {step === 1 && <Step1 data={data} set={set} errors={errors} c={c} />}
-        {step === 2 && <Step2 data={data} set={set} errors={errors} c={c} />}
+        {step === 2 && <Step2 data={data} set={set} errors={errors} c={c} opts={dropdownOptions} />}
         {step === 3 && <Step3 data={data} set={set} errors={errors} c={c} opts={dropdownOptions} />}
         {step === 4 && <Step4 data={data} set={set} errors={errors} c={c} opts={dropdownOptions} />}
         {step === 5 && customFields.length > 0 && (
@@ -423,7 +427,7 @@ function Step1({ data, set, errors, c }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — VEHICLE INFO
 // ─────────────────────────────────────────────────────────────────────────────
-function Step2({ data, set, errors, c }) {
+function Step2({ data, set, errors, c, opts }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <SectionDivider title="Vehicle Information" />
@@ -465,7 +469,7 @@ function Step2({ data, set, errors, c }) {
           placeholder="Select…"
           value={data.emissionCategory}
           onChange={(e) => set('emissionCategory', e.target.value)}
-          options={['BS3', 'BS4', 'BS6', 'BS6 Phase 2']}
+          options={opts.emissionCategories || []}
         />
       </div>
     </div>

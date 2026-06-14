@@ -1,4 +1,7 @@
-// SGA — Last updated: Fixed fetchBusinessSettings() — was reading from non-existent /settings/business doc, always returning null; corrected to /settings/main (the canonical settings document), fixing empty "Connect With Us" and logo/phone/GST sections in Quotation PDFs
+// SGA — Last updated: Fixed 2 logAudit() positional-argument calls — createQuotation and
+// sendQuotationWhatsApp were calling logAudit("action", id, collection, {metadata}) which
+// silently passed a string as the destructured parameter object, recording nothing.
+// Both calls converted to the correct object form: logAudit({ action, userId, ... }).
 // src/lib/quotationService.js
 // Phase 5 — Quotation Module
 // All Firestore, Storage, and Cloud Function operations for quotations.
@@ -26,7 +29,7 @@ import {
 } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import { db, storage, functions } from "./firebase";
-import { logAudit } from "./auditService";
+import { logAudit, AUDIT_ACTIONS } from "./auditService";
 
 const QUOTATIONS_COLLECTION = "quotations";
 
@@ -108,10 +111,19 @@ export async function createQuotation(quotationData, userId, userDisplayName) {
 
   const docRef = await addDoc(collection(db, QUOTATIONS_COLLECTION), payload);
 
-  await logAudit("quotation_created", docRef.id, QUOTATIONS_COLLECTION, {
-    quotationNumber,
-    customerName: payload.customerName,
-    totalAmount: payload.totalAmount,
+  // FIX: was logAudit("quotation_created", docRef.id, QUOTATIONS_COLLECTION, {...})
+  // which passed a string as the destructured object — action was never recorded.
+  await logAudit({
+    action:           AUDIT_ACTIONS.QUOTATION_CREATED,
+    userId:           userId,
+    userName:         userDisplayName || "Unknown",
+    targetId:         docRef.id,
+    targetCollection: QUOTATIONS_COLLECTION,
+    metadata: {
+      quotationNumber,
+      customerName: payload.customerName,
+      totalAmount:  payload.totalAmount,
+    },
   });
 
   return { id: docRef.id, ...payload };
@@ -212,10 +224,19 @@ export async function sendQuotationWhatsApp(
   if (result.data.success) {
     await markQuotationWhatsAppSent(quotationId, customerPhone);
 
-    await logAudit("quotation_whatsapp_sent", quotationId, QUOTATIONS_COLLECTION, {
-      quotationNumber,
-      customerPhone,
-      customerName,
+    // FIX: was logAudit("quotation_whatsapp_sent", quotationId, QUOTATIONS_COLLECTION, {...})
+    // which passed a string as the destructured object — action was never recorded.
+    await logAudit({
+      action:           "quotation.whatsapp_sent",
+      userId:           userId,
+      userName:         null,   // display name not available in this function's signature
+      targetId:         quotationId,
+      targetCollection: QUOTATIONS_COLLECTION,
+      metadata: {
+        quotationNumber,
+        customerPhone,
+        customerName,
+      },
     });
   }
 

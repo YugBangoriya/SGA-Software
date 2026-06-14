@@ -1,9 +1,10 @@
-// SGA — Last updated: Three fixes — (1) loadSettings() path corrected from /settings/business
-// to /settings/main so businessSettings/gstNumber/logo/address/phone populate on Invoice PDFs;
-// (2) subscribeSystemConfig() path corrected from systemConfig/global to systemConfig/main so
-// the DB-lock state in invoiceStore actually reflects SuperAdmin's lock toggle; (3) invoice
-// numbering (INV-DD-MM-YYYY-XXX / RETURN-INV-DD-MM-YYYY-XXX) now uses the invoice's own
-// (possibly back-dated/overridden) date instead of always using today's creation date.
+// SGA — Last updated: Fixed 9 logAudit() positional-argument calls — all calls in
+// createInvoice, approveInvoice, rejectInvoice, deleteInvoice, updatePaymentStatus,
+// logPdfDownload, logWhatsAppSent, createReturnInvoice, and approveReturnInvoice were
+// calling logAudit("action", id, collection, {metadata}) which silently passed a string
+// as the destructured parameter object, so action/userId/userName were all recorded as
+// undefined. All 9 calls converted to the correct object form: logAudit({ action, userId, ... }).
+// AUDIT_ACTIONS import added alongside existing logAudit import.
 // ============================================================
 // invoiceStore.js — Zustand store for Invoice Module
 // Phase 4 — Shree Ganesh Automobile
@@ -28,7 +29,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { logAudit } from '../lib/auditService';
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditService';
 
 // ── helpers ─────────────────────────────────────────────────
 const INVOICE_COLLECTION = "invoices";
@@ -244,11 +245,19 @@ const useInvoiceStore = create((set, get) => ({
 
       const ref = await addDoc(collection(db, INVOICE_COLLECTION), payload);
 
-      await logAudit("invoice_created", ref.id, INVOICE_COLLECTION, {
-        invoiceNo,
-        customerName: invoiceData.customerSnapshot?.name,
-        totalAmount: invoiceData.totalAmount,
-        createdByName: payload.createdByName,
+      // FIX: was logAudit("invoice_created", ref.id, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           AUDIT_ACTIONS.INVOICE_CREATED,
+        userId:           currentUser.uid,
+        userName:         createdByName,
+        targetId:         ref.id,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo,
+          customerName:  invoiceData.customerSnapshot?.name,
+          totalAmount:   invoiceData.totalAmount,
+          createdByName,
+        },
       });
 
       set({ loading: false });
@@ -296,11 +305,19 @@ const useInvoiceStore = create((set, get) => ({
 
       await batch.commit();
 
-      await logAudit("invoice_approved", invoiceId, INVOICE_COLLECTION, {
-        invoiceNo: invoice.invoiceNo,
-        approvedByName: currentUser.displayName || currentUser.email,
-        totalAmount: invoice.totalAmount,
-        itemsDeducted: invoice.items?.length || 0,
+      // FIX: was logAudit("invoice_approved", invoiceId, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           AUDIT_ACTIONS.INVOICE_APPROVED,
+        userId:           currentUser.uid,
+        userName:         currentUser.displayName || currentUser.email || "Unknown",
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:       invoice.invoiceNo,
+          approvedByName:  currentUser.displayName || currentUser.email,
+          totalAmount:     invoice.totalAmount,
+          itemsDeducted:   invoice.items?.length || 0,
+        },
       });
 
       set({ loading: false });
@@ -319,9 +336,17 @@ const useInvoiceStore = create((set, get) => ({
       if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
       const invoice = invoiceSnap.data();
 
-      await logAudit("invoice_rejected", invoiceId, INVOICE_COLLECTION, {
-        invoiceNo: invoice.invoiceNo,
-        rejectedByName: currentUser.displayName || currentUser.email,
+      // FIX: was logAudit("invoice_rejected", invoiceId, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           "invoice.rejected",
+        userId:           currentUser.uid,
+        userName:         currentUser.displayName || currentUser.email || "Unknown",
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:       invoice.invoiceNo,
+          rejectedByName:  currentUser.displayName || currentUser.email,
+        },
       });
 
       await deleteDoc(doc(db, INVOICE_COLLECTION, invoiceId));
@@ -339,9 +364,17 @@ const useInvoiceStore = create((set, get) => ({
     try {
       const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
       if (invoiceSnap.exists()) {
-        await logAudit("invoice_deleted", invoiceId, INVOICE_COLLECTION, {
-          invoiceNo: invoiceSnap.data().invoiceNo,
-          deletedByName: currentUser.displayName || currentUser.email,
+        // FIX: was logAudit("invoice_deleted", invoiceId, INVOICE_COLLECTION, {...})
+        await logAudit({
+          action:           AUDIT_ACTIONS.INVOICE_DELETED,
+          userId:           currentUser.uid,
+          userName:         currentUser.displayName || currentUser.email || "Unknown",
+          targetId:         invoiceId,
+          targetCollection: INVOICE_COLLECTION,
+          metadata: {
+            invoiceNo:     invoiceSnap.data().invoiceNo,
+            deletedByName: currentUser.displayName || currentUser.email,
+          },
         });
       }
       await deleteDoc(doc(db, INVOICE_COLLECTION, invoiceId));
@@ -367,9 +400,18 @@ const useInvoiceStore = create((set, get) => ({
         currentUser.email ||
         currentUser.uid ||
         "Unknown";
-      await logAudit("invoice_status_updated", invoiceId, INVOICE_COLLECTION, {
-        newPaymentStatus: updates.paymentStatus,
-        updatedByName,
+
+      // FIX: was logAudit("invoice_status_updated", invoiceId, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           "invoice.payment_status_updated",
+        userId:           currentUser.uid,
+        userName:         updatedByName,
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          newPaymentStatus: updates.paymentStatus,
+          updatedByName,
+        },
       });
 
       set({ loading: false });
@@ -381,18 +423,34 @@ const useInvoiceStore = create((set, get) => ({
 
   // ── log PDF download ───────────────────────────────────────
   logPdfDownload: async (invoiceId, invoiceNo, currentUser) => {
-    await logAudit("invoice_pdf_downloaded", invoiceId, INVOICE_COLLECTION, {
-      invoiceNo,
-      downloadedByName: currentUser.displayName || currentUser.email,
+    // FIX: was logAudit("invoice_pdf_downloaded", invoiceId, INVOICE_COLLECTION, {...})
+    await logAudit({
+      action:           "invoice.pdf_downloaded",
+      userId:           currentUser.uid,
+      userName:         currentUser.displayName || currentUser.email || "Unknown",
+      targetId:         invoiceId,
+      targetCollection: INVOICE_COLLECTION,
+      metadata: {
+        invoiceNo,
+        downloadedByName: currentUser.displayName || currentUser.email,
+      },
     });
   },
 
   // ── log WhatsApp send ──────────────────────────────────────
   logWhatsAppSent: async (invoiceId, invoiceNo, phone, currentUser) => {
-    await logAudit("invoice_whatsapp_sent", invoiceId, INVOICE_COLLECTION, {
-      invoiceNo,
-      sentToPhone: phone,
-      sentByName: currentUser.displayName || currentUser.email,
+    // FIX: was logAudit("invoice_whatsapp_sent", invoiceId, INVOICE_COLLECTION, {...})
+    await logAudit({
+      action:           "invoice.whatsapp_sent",
+      userId:           currentUser.uid,
+      userName:         currentUser.displayName || currentUser.email || "Unknown",
+      targetId:         invoiceId,
+      targetCollection: INVOICE_COLLECTION,
+      metadata: {
+        invoiceNo,
+        sentToPhone:  phone,
+        sentByName:   currentUser.displayName || currentUser.email,
+      },
     });
   },
 
@@ -425,10 +483,23 @@ const useInvoiceStore = create((set, get) => ({
         updatedAt: serverTimestamp(),
       };
       const ref = await addDoc(collection(db, INVOICE_COLLECTION), payload);
-      await logAudit("return_invoice_created", ref.id, INVOICE_COLLECTION, {
-        invoiceNo, customerName: invoiceData.customerSnapshot?.name,
-        totalReturnAmount, createdByName, itemCount: returnItems.length,
+
+      // FIX: was logAudit("return_invoice_created", ref.id, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           "invoice.return_created",
+        userId:           currentUser.uid,
+        userName:         createdByName,
+        targetId:         ref.id,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo,
+          customerName:       invoiceData.customerSnapshot?.name,
+          totalReturnAmount,
+          createdByName,
+          itemCount:          returnItems.length,
+        },
       });
+
       set({ loading: false });
       return ref.id;
     } catch (err) {
@@ -467,12 +538,22 @@ const useInvoiceStore = create((set, get) => ({
         }
       }
       await batch.commit();
-      await logAudit("return_invoice_approved", invoiceId, INVOICE_COLLECTION, {
-        invoiceNo: invoice.invoiceNo,
-        approvedByName: currentUser.displayName || currentUser.email,
-        totalReturnAmount: invoice.totalReturnAmount,
-        itemsRestocked: invoice.returnItems?.length || 0,
+
+      // FIX: was logAudit("return_invoice_approved", invoiceId, INVOICE_COLLECTION, {...})
+      await logAudit({
+        action:           "invoice.return_approved",
+        userId:           currentUser.uid,
+        userName:         currentUser.displayName || currentUser.email || "Unknown",
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:           invoice.invoiceNo,
+          approvedByName:      currentUser.displayName || currentUser.email,
+          totalReturnAmount:   invoice.totalReturnAmount,
+          itemsRestocked:      invoice.returnItems?.length || 0,
+        },
       });
+
       set({ loading: false });
     } catch (err) {
       set({ error: err.message, loading: false });
