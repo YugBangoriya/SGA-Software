@@ -1,8 +1,9 @@
-// SGA — Last updated: Added select-mode + 2-step DELETE confirmation for individual quotation deletion
+// SGA — Last updated: Added "Manage" button to header for accessing Manage Quotations
+// (price table management for BS4/BS6-4INJ/BS6-8INJ emission categories).
 // src/pages/quotations/QuotationList.jsx
 // Phase 5 — Quotation Module — Searchable, filterable list. Owner-only.
 //
-// NEW: Owner/SuperAdmin can enter "Select Mode" via the Trash icon in the header.
+// Owner/SuperAdmin can enter "Select Mode" via the Trash icon in the header.
 // In select mode each card shows a small checkbox. Selecting one or more reveals
 // a red delete bar at the bottom. Deletion requires typing "DELETE" to confirm.
 
@@ -10,7 +11,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus, Search, Filter, X, ChevronRight,
-  FileText, Loader2, Car, Phone, Trash2,
+  FileText, Loader2, Car, Phone, Trash2, Settings,
 } from "lucide-react";
 import useQuotationStore from "../../store/quotationStore";
 import useAuthStore from "../../store/authStore";
@@ -195,13 +196,20 @@ function QuotationCard({ quotation, onClick, selectMode, selected, onSelect }) {
                   {quotation.quotationNumber}
                 </span>
                 <StatusBadge status={quotation.status} />
+                {quotation.emissionCategory && (
+                  <span className="text-[10px] font-semibold font-sans px-2 py-0.5 rounded-full bg-[#E3F2FD] text-[#0055CC]">
+                    {quotation.emissionCategory.replace("_", "-")}
+                  </span>
+                )}
                 {quotation.isManualVehicle && (
                   <span className="text-[10px] font-semibold font-sans px-2 py-0.5 rounded-full bg-[#FFF3E0] text-[#CC6600]">
                     Manual Vehicle
                   </span>
                 )}
               </div>
-              <p className="text-base font-bold text-[#222] truncate">{quotation.customerName}</p>
+              <p className="text-base font-bold text-[#222] truncate">
+                {quotation.customerName || <span className="text-[#AAA] font-normal italic">No customer name</span>}
+              </p>
               <div className="flex items-center gap-1 mt-0.5">
                 <Car size={11} className="text-[#AAA] flex-shrink-0" />
                 <p className="text-xs text-[#666] font-sans truncate">
@@ -226,7 +234,7 @@ function QuotationCard({ quotation, onClick, selectMode, selected, onSelect }) {
           <div className="flex items-center gap-1">
             <Phone size={11} className="text-[#AAA]" />
             <span className="text-xs text-[#888] font-sans font-mono">
-              +91 {quotation.customerPhone}
+              {quotation.customerPhone ? `+91 ${quotation.customerPhone}` : "—"}
             </span>
           </div>
           {!selectMode && (
@@ -298,9 +306,7 @@ export default function QuotationList() {
     if (!currentUser) return;
     setIsDeleting(true);
     try {
-      // Delete all selected in parallel
       await Promise.all([...selectedIds].map((id) => deleteQuotation(id, currentUser)));
-      // Remove from local store
       setQuotations(quotations.filter((q) => !selectedIds.has(q.id)));
     } catch (err) {
       console.error("[QuotationList] delete failed:", err);
@@ -326,6 +332,19 @@ export default function QuotationList() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Manage Quotations button — always visible when not in select mode */}
+              {!selectMode && (
+                <button
+                  onClick={() => navigate("/quotations/manage")}
+                  title="Manage price tables (BS4, BS6-4INJ, BS6-8INJ)"
+                  className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white
+                    rounded-xl px-3 py-2.5 text-xs font-semibold font-sans transition-colors"
+                >
+                  <Settings size={14} />
+                  <span className="hidden sm:inline">Manage</span>
+                </button>
+              )}
+
               {/* Trash / select mode toggle */}
               {!selectMode && (
                 <button
@@ -336,6 +355,7 @@ export default function QuotationList() {
                   <Trash2 size={16} />
                 </button>
               )}
+
               {selectMode ? (
                 <button
                   onClick={toggleSelectMode}
@@ -349,7 +369,7 @@ export default function QuotationList() {
                   className="flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white rounded-xl px-4 py-2.5 text-sm font-semibold font-sans transition-colors backdrop-blur-sm"
                 >
                   <Plus size={16} />
-                  New Quotation
+                  New
                 </button>
               )}
             </div>
@@ -358,111 +378,100 @@ export default function QuotationList() {
           {/* Select mode banner */}
           {selectMode && (
             <div className="mt-3 text-center text-white/80 text-xs font-sans">
-              {selectedIds.size > 0
-                ? `${selectedIds.size} quotation${selectedIds.size !== 1 ? "s" : ""} selected`
-                : "Tap a quotation to select it"}
-            </div>
-          )}
-
-          {/* Search bar — hidden in select mode */}
-          {!selectMode && (
-            <div className="mt-4 flex gap-2">
-              <div className="flex-1 relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAA]" />
-                <input
-                  type="text"
-                  placeholder="Search by name, number, or vehicle…"
-                  value={filters.searchQuery}
-                  onChange={(e) => setFilter("searchQuery", e.target.value)}
-                  className="w-full h-10 pl-9 pr-3 rounded-xl bg-white/95 text-sm font-sans
-                    text-[#222] placeholder-[#AAA] outline-none border-2 border-transparent
-                    focus:border-white/50 transition-all"
-                />
-                {filters.searchQuery && (
-                  <button
-                    onClick={() => setFilter("searchQuery", "")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAA] hover:text-[#666]"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={() => setShowFilters((v) => !v)}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors flex-shrink-0
-                  ${hasActiveFilters || showFilters
-                    ? "bg-white text-[#661F1F]"
-                    : "bg-white/15 text-white hover:bg-white/25"
-                  }`}
-              >
-                <Filter size={16} />
-              </button>
+              Tap quotations to select · {selectedIds.size} selected
             </div>
           )}
         </div>
-      </div>
 
-      <div className="max-w-2xl mx-auto px-4 pt-5">
-
-        {/* ── Date Filters (expandable) ── */}
-        {showFilters && !selectMode && (
-          <div className="bg-white rounded-2xl border border-[#E8E2DF] p-4 mb-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-bold text-[#661F1F] font-sans uppercase tracking-wide">
-                Filter by Date
-              </p>
-              {hasActiveFilters && (
+        {/* ── Search + filter bar ── */}
+        {!selectMode && (
+          <div className="max-w-2xl mx-auto px-4 pb-4 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
+              <input
+                value={filters.searchQuery}
+                onChange={(e) => setFilter("searchQuery", e.target.value)}
+                placeholder="Search by name, vehicle, number…"
+                className="w-full h-10 pl-9 pr-9 rounded-xl text-sm font-sans text-white
+                  placeholder-white/50 outline-none transition-all"
+                style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)" }}
+              />
+              {filters.searchQuery && (
                 <button
-                  onClick={clearFilters}
-                  className="text-xs text-[#CC0000] font-semibold font-sans hover:underline flex items-center gap-1"
+                  onClick={() => setFilter("searchQuery", "")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
                 >
-                  <X size={11} /> Clear filters
+                  <X size={13} />
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] text-[#888] font-sans">From</label>
-                <input
-                  type="date"
-                  value={filters.dateFrom}
-                  onChange={(e) => setFilter("dateFrom", e.target.value)}
-                  className="h-10 px-3 rounded-lg border border-[#E8E2DF] text-sm font-sans
-                    text-[#222] outline-none focus:border-[#661F1F] bg-[#FAFAFA]"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] text-[#888] font-sans">To</label>
-                <input
-                  type="date"
-                  value={filters.dateTo}
-                  onChange={(e) => setFilter("dateTo", e.target.value)}
-                  className="h-10 px-3 rounded-lg border border-[#E8E2DF] text-sm font-sans
-                    text-[#222] outline-none focus:border-[#661F1F] bg-[#FAFAFA]"
-                />
-              </div>
-            </div>
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors
+                ${hasActiveFilters ? "bg-white/30 text-white" : "bg-white/15 text-white/70 hover:bg-white/25"}`}
+              title="Date filters"
+            >
+              <Filter size={15} />
+            </button>
           </div>
         )}
+      </div>
 
-        {/* ── Stats strip ── */}
-        {!isLoading && filteredQuotations.length > 0 && !selectMode && (
-          <div className="flex items-center justify-between mb-4 px-1">
-            <p className="text-xs text-[#666] font-sans">
-              <span className="font-bold text-[#333]">{filteredQuotations.length}</span>{" "}
-              quotation{filteredQuotations.length !== 1 ? "s" : ""}
-              {(filters.searchQuery || hasActiveFilters) ? " found" : " total"}
-            </p>
-            <p className="text-xs text-[#888] font-sans">
+      {/* ── Date filter panel ── */}
+      {showFilters && !selectMode && (
+        <div className="bg-white border-b border-[#E8E2DF] px-4 py-3 max-w-2xl mx-auto">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#888] font-sans">From:</span>
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(e) => setFilter("dateFrom", e.target.value)}
+                className="h-9 px-2 rounded-lg border border-[#E8E2DF] text-sm font-sans text-[#333]
+                  outline-none focus:border-[#661F1F]"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#888] font-sans">To:</span>
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(e) => setFilter("dateTo", e.target.value)}
+                className="h-9 px-2 rounded-lg border border-[#E8E2DF] text-sm font-sans text-[#333]
+                  outline-none focus:border-[#661F1F]"
+              />
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="text-xs text-[#661F1F] font-semibold font-sans hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Main content ── */}
+      <div className="max-w-2xl mx-auto px-4 pt-4">
+
+        {/* Summary bar */}
+        {!isLoading && filteredQuotations.length > 0 && (
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-xs text-[#888] font-sans">
+              {filteredQuotations.length} quotation{filteredQuotations.length !== 1 ? "s" : ""}
+            </span>
+            <span className="text-xs text-[#666] font-mono">
               Total:{" "}
-              <span className="font-mono font-bold text-[#333]">
+              <span className="font-bold text-[#333]">
                 {formatINR(filteredQuotations.reduce((s, q) => s + (q.totalAmount || 0), 0))}
               </span>
-            </p>
+            </span>
           </div>
         )}
 
-        {/* ── Loading ── */}
+        {/* Loading */}
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <Loader2 size={28} className="text-[#661F1F] animate-spin" />
@@ -470,7 +479,7 @@ export default function QuotationList() {
           </div>
         )}
 
-        {/* ── Error ── */}
+        {/* Error */}
         {loadError && !isLoading && (
           <div className="bg-[#FFEBEE] border border-[#F0B8B8] rounded-xl px-4 py-4 flex items-center gap-3 mb-4">
             <span className="text-[#CC0000] text-xl">⚠</span>
@@ -478,7 +487,7 @@ export default function QuotationList() {
           </div>
         )}
 
-        {/* ── Empty state ── */}
+        {/* Empty state */}
         {!isLoading && !loadError && filteredQuotations.length === 0 && (
           <EmptyState
             hasFilters={!!(filters.searchQuery || hasActiveFilters)}
@@ -486,7 +495,7 @@ export default function QuotationList() {
           />
         )}
 
-        {/* ── Quotation cards ── */}
+        {/* Quotation cards */}
         {!isLoading && !loadError && (
           <div className="flex flex-col gap-3">
             {filteredQuotations.map((q) => (
@@ -506,7 +515,7 @@ export default function QuotationList() {
         )}
       </div>
 
-      {/* ── FAB for mobile ── */}
+      {/* FAB for mobile */}
       {!selectMode && (
         <button
           onClick={() => navigate("/quotations/new")}
@@ -518,7 +527,7 @@ export default function QuotationList() {
         </button>
       )}
 
-      {/* ── Delete Bottom Bar ── */}
+      {/* Delete Bottom Bar */}
       {selectMode && selectedIds.size > 0 && (
         <div style={{
           position: "fixed", bottom: 0, left: 0, right: 0,
@@ -544,7 +553,7 @@ export default function QuotationList() {
         </div>
       )}
 
-      {/* ── Delete Confirmation Modal ── */}
+      {/* Delete Confirmation Modal */}
       {showDeleteModal && (
         <DeleteConfirmModal
           count={selectedIds.size}

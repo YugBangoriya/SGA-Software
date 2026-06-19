@@ -1,19 +1,29 @@
-// SGA — Last updated: Added explicit rule for /notifications collection (Bug 2 fix) — previously fell under the default-deny catch-all, causing "Failed to save quotation" errors for manual-vehicle-entry quotations even though the quotation itself saved successfully
+// SGA — Last updated: Bug Fix — Added /docsCategories rule (was missing — caused "Missing or
+// insufficient permissions" for Owner/SuperAdmin when creating categories in Docs Repository).
+// Added /docsFolders rule for new nested folder structure in Docs Repository redesign.
+// Added /quotationPriceTables rule for new Manage Quotations price table feature.
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.3 | Post-Launch Fix
+// Version: 1.4 | Docs Category Bug Fix + Quotation Tables + Nested Folders
 //
-// ── CHANGES FROM v1.1 ────────────────────────────────────────────────────
-//   FIX 4 — /inventory/{itemId}/restockHistory subcollection had NO rule.
-//            Firestore rules do NOT cascade from a parent document to its
-//            subcollections — each must be explicitly declared.
-//            Without this rule, getRestockHistory() failed in production
-//            with a permission-denied error (catch-all DENY ALL applied).
-//            The error was caught by the store, but because fetchItem()
-//            could also fail for network/timing reasons and the
-//            ItemDetailPage had no error state handling, any failure left
-//            the page stuck on "Loading item..." indefinitely.
-//            Fix: added explicit rule for the subcollection (all staff read,
-//            Owner+ write — matches the parent inventory permission model).
+// ── CHANGES FROM v1.3 ────────────────────────────────────────────────────
+//   BUG FIX — /docsCategories had NO rule in v1.3.
+//             useDocsRepository.js stores categories in the "docsCategories"
+//             collection, but firestore.rules only had a rule for
+//             "docsRepository". The catch-all DENY ALL block then silently
+//             denied every read and write to "docsCategories" for ALL roles,
+//             including Owner and SuperAdmin. This produced the
+//             "Missing or insufficient permissions" error shown in the UI
+//             whenever the CategoryManager tried to load or create categories.
+//             Fix: added explicit rule for /docsCategories/{docId} mirroring
+//             the same access model as /docsRepository (Owner+ read/write,
+//             all staff read).
+//
+//   NEW — /docsFolders collection for hierarchical nested folder structure
+//         in Docs Repository. Owner+ can create, rename, delete folders.
+//         All staff can read (needed to navigate folder tree).
+//
+//   NEW — /quotationPriceTables collection for Manage Quotations price
+//         table feature. Owner+ read/write. Superadmin can delete.
 //
 // ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
 //   superadmin  → God-mode. Manages users, backups, car repo, system config.
@@ -31,8 +41,11 @@
 //   [✓] Users can only modify their own theme/language preferences
 //   [✓] Car repository: write restricted to superadmin only
 //   [✓] No sensitive data accessible to unauthenticated requests
-//   [✓] followUpTemplates: Owner+ read/write (was missing — caused loading loop)
+//   [✓] followUpTemplates: Owner+ read/write
 //   [✓] inventory/restockHistory subcollection: explicitly covered (v1.2)
+//   [✓] docsCategories: Owner+ read/write (v1.4 — BUG FIX)
+//   [✓] docsFolders: Owner+ read/write, all staff read (v1.4)
+//   [✓] quotationPriceTables: Owner+ read/write (v1.4)
 // ─────────────────────────────────────────────────────────────────────────
 
 rules_version = '2';
@@ -68,12 +81,6 @@ service cloud.firestore {
     }
 
     function invoiceDbLocked() {
-      // FIX: Use exists() guard before accessing .data.
-      // If systemConfig/main does not exist yet, get() returns null and
-      // null.data throws a NullPointerException in rule evaluation which
-      // DENIES the request. This caused Owner (not SuperAdmin — whose rule
-      // short-circuits) to be denied invoice reads entirely, which made ALL
-      // dashboard stats show 0 because the fetch aborted on the first query.
       return exists(/databases/$(database)/documents/systemConfig/main) &&
         get(/databases/$(database)/documents/systemConfig/main).data.invoiceDbLocked == true;
     }
@@ -128,22 +135,17 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /inventory — Inventory items + restockHistory subcollection
-    // FIX v1.2: Added explicit rule for restockHistory subcollection.
-    // Firestore rules do NOT inherit from the parent match block.
-    // Without this, getRestockHistory() was denied in production.
     // ──────────────────────────────────────────────────────────
     match /inventory/{itemId} {
       allow read:           if isAnyStaff();
       allow create, update: if isOwnerOrAbove();
       allow delete:         if isOwnerOrAbove();
 
-      // Restock history subcollection — all staff can read,
-      // only Owner+ can write (same model as parent inventory doc).
       match /restockHistory/{historyId} {
         allow read:   if isAnyStaff();
         allow create: if isOwnerOrAbove();
-        allow update: if isSuperAdmin();   // effectively immutable; SA only for data correction
-        allow delete: if isSuperAdmin();   // SA can clean up duplicate entries if needed
+        allow update: if isSuperAdmin();
+        allow delete: if isSuperAdmin();
       }
     }
 
@@ -154,6 +156,18 @@ service cloud.firestore {
       allow read:             if isOwnerOrAbove();
       allow create, update:   if isOwnerOrAbove();
       allow delete:           if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /quotationPriceTables — Price tables for Manage Quotations
+    // NEW in v1.4: stores Kit, Advancer, Extras, Cylinder pricing
+    // for BS4 / BS6-4INJ / BS6-8INJ emission categories.
+    // Document IDs: "BS4", "BS6_4INJ", "BS6_8INJ"
+    // ──────────────────────────────────────────────────────────
+    match /quotationPriceTables/{tableId} {
+      allow read:             if isOwnerOrAbove();
+      allow create, update:   if isOwnerOrAbove();
+      allow delete:           if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
@@ -173,7 +187,7 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /followUpTemplates — Follow-up message templates (EN/HI/GU)
+    // /followUpTemplates — Follow-up message templates
     // ──────────────────────────────────────────────────────────
     match /followUpTemplates/{templateId} {
       allow read:           if isOwnerOrAbove();
@@ -201,9 +215,37 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /docsRepository — Business documents
+    // /docsRepository — Business document records
     // ──────────────────────────────────────────────────────────
     match /docsRepository/{docId} {
+      allow read:           if isAnyStaff();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /docsCategories — Flat category labels for Docs Repository
+    // BUG FIX v1.4: This collection was MISSING from the rules.
+    // useDocsRepository.js stores categories here (collection name
+    // "docsCategories"). Without this rule, the catch-all DENY ALL
+    // blocked every read/write, including Owner and SuperAdmin —
+    // causing the "Missing or insufficient permissions" error in
+    // the CategoryManager modal.
+    // ──────────────────────────────────────────────────────────
+    match /docsCategories/{categoryId} {
+      allow read:           if isAnyStaff();
+      allow create, update: if isOwnerOrAbove();
+      allow delete:         if isOwnerOrAbove();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /docsFolders — Nested folder hierarchy for Docs Repository
+    // NEW in v1.4: enables Windows Explorer-style folder tree.
+    // parentId: null for root folders, folderId string for nested.
+    // All staff can read to navigate the tree.
+    // Owner+ can create, rename, delete folders.
+    // ──────────────────────────────────────────────────────────
+    match /docsFolders/{folderId} {
       allow read:           if isAnyStaff();
       allow create, update: if isOwnerOrAbove();
       allow delete:         if isOwnerOrAbove();
@@ -238,7 +280,7 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /messageTemplates — Follow-up message templates (legacy name)
+    // /messageTemplates — Follow-up message templates (legacy)
     // ──────────────────────────────────────────────────────────
     match /messageTemplates/{templateId} {
       allow read:           if isOwnerOrAbove();
@@ -247,8 +289,7 @@ service cloud.firestore {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /notifications — SuperAdmin alerts (e.g. car model not in
-    // Car Repository, used during Quotation creation)
+    // /notifications — SuperAdmin alerts
     // ──────────────────────────────────────────────────────────
     match /notifications/{notifId} {
       allow read:   if isOwnerOrAbove();
