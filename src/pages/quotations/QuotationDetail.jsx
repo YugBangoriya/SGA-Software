@@ -1,13 +1,13 @@
-// SGA — Last updated: Feature 3 — standardized formatDate() from month:'long' (e.g. "02 April 2026")
-// to month:'short' (e.g. "02 Apr 2026") so dates match QuotationList.jsx, QuotationPDF.jsx, and
-// the Invoice module across the app.
-// the component shows a clear error instead of crashing with "Cannot read properties of undefined".
-// No other behaviour or UI has been changed.
+// SGA — Last updated: Bug Fix — Logo pre-fetch for quotation PDFs.
+// Added fetchImageAsBase64() helper; both handleGeneratePdf() and
+// handleSendWhatsApp() now call enrichBizSettingsWithLogo() before
+// passing businessSettings to QuotationPDFDocument so the logo renders
+// correctly instead of showing a blank box.
+// Prior fixes retained: Feature 3 — standardized formatDate(); null-safe
+// load guard; currentUser.uid fix.
 //
 // src/pages/quotations/QuotationDetail.jsx
 // Phase 5 — Quotation Module
-// Shows full quotation, generates PDF via @react-pdf/renderer,
-// uploads to Storage, and triggers WhatsApp send via Cloud Function.
 
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
@@ -26,6 +26,36 @@ import {
   updateQuotationPdfUrl,
 } from "../../lib/quotationService";
 import { useAuth } from "../../hooks/useAuth";
+
+// ─── Logo pre-fetch helper ─────────────────────────────────────────────────────
+// BUG FIX: @react-pdf/renderer cannot reliably fetch remote Firebase Storage
+// URLs due to CORS. We pre-fetch the logo and convert to base64 before passing
+// it to the PDF renderer.
+async function fetchImageAsBase64(url) {
+  if (!url || typeof url !== "string") return null;
+  if (url.startsWith("data:")) return url; // already base64
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror  = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    console.warn("[QuotationDetail] Logo pre-fetch failed (CORS / network). PDF generated without logo.");
+    return null;
+  }
+}
+
+async function enrichBizSettingsWithLogo(bizSettings) {
+  if (!bizSettings?.businessLogoUrl) return bizSettings;
+  if (bizSettings.businessLogoUrl.startsWith("data:")) return bizSettings;
+  const base64 = await fetchImageAsBase64(bizSettings.businessLogoUrl);
+  return { ...bizSettings, businessLogoUrl: base64 || null };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatINR(n) {
@@ -89,10 +119,7 @@ export default function QuotationDetail() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // FIX: useAuth() returns { user, uid, displayName, role, ... } — it does NOT have a
-  // `currentUser` key. Destructuring `currentUser` previously always gave `undefined`,
-  // causing `currentUser.uid` to throw a TypeError when the WhatsApp send button was pressed.
-  // We now use `uid` directly, which is the string UID (or null when not authenticated).
+  // FIX: useAuth() returns { uid, displayName, role, ... } — use uid directly.
   const { uid: currentUserUid } = useAuth();
 
   // Try to use data passed from create form (avoids a Firestore fetch)
@@ -109,7 +136,7 @@ export default function QuotationDetail() {
   const [isGeneratingPdf,   setIsGeneratingPdf]   = useState(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [pdfBlob,           setPdfBlob]           = useState(null);
-  const [localPdfUrl,       setLocalPdfUrl]       = useState(null); // object URL for preview/download
+  const [localPdfUrl,       setLocalPdfUrl]       = useState(null);
   const [actionSuccess,     setActionSuccess]     = useState(null);
   const [actionError,       setActionError]       = useState(null);
   const [showSuccessBanner, setShowSuccessBanner] = useState(isNewlyCreated);
@@ -133,7 +160,7 @@ export default function QuotationDetail() {
         }
       })();
     }
-  }, [id]);
+  }, [id]); // eslint-disable-line
 
   // Hide new-creation banner after 5s
   useEffect(() => {
@@ -153,7 +180,12 @@ export default function QuotationDetail() {
     setIsGeneratingPdf(true);
     setActionError(null);
     try {
-      const doc = <QuotationPDFDocument quotation={quotation} businessSettings={bizSettings} />;
+      // BUG FIX: Pre-fetch logo as base64 before passing to @react-pdf/renderer.
+      // Remote Firebase Storage URLs fail silently inside the PDF renderer due
+      // to CORS, leaving the logo area blank. Converting to base64 first fixes this.
+      const enrichedSettings = await enrichBizSettingsWithLogo(bizSettings);
+
+      const doc = <QuotationPDFDocument quotation={quotation} businessSettings={enrichedSettings} />;
       const blob = await pdf(doc).toBlob();
       setPdfBlob(blob);
 
@@ -190,11 +222,6 @@ export default function QuotationDetail() {
 
   // ─── Send via WhatsApp ───────────────────────────────────────────────────
   const handleSendWhatsApp = async () => {
-    // FIX: Guard against expired/missing session before attempting the send.
-    // `currentUserUid` is null when the user is not authenticated (e.g. session
-    // expired while the page was open). Previously this crashed with TypeError
-    // because `currentUser.uid` was called on undefined. Now we show a clear
-    // user-facing error instead.
     if (!currentUserUid) {
       setActionError("Your session has expired. Please log in again to send the quotation.");
       return;
@@ -206,7 +233,9 @@ export default function QuotationDetail() {
       // Generate + upload PDF if not already done
       let pdfUrl = quotation.pdfUrl;
       if (!pdfUrl) {
-        const doc = <QuotationPDFDocument quotation={quotation} businessSettings={bizSettings} />;
+        // BUG FIX: Pre-fetch logo as base64 for the same CORS reason as above
+        const enrichedSettings = await enrichBizSettingsWithLogo(bizSettings);
+        const doc = <QuotationPDFDocument quotation={quotation} businessSettings={enrichedSettings} />;
         const blob = await pdf(doc).toBlob();
         pdfUrl = await uploadQuotationPdf(blob, quotation.quotationNumber);
         await updateQuotationPdfUrl(quotation.id, pdfUrl);
@@ -219,7 +248,7 @@ export default function QuotationDetail() {
         quotation.customerPhone,
         quotation.customerName,
         quotation.quotationNumber,
-        currentUserUid  // now a string UID, never undefined
+        currentUserUid
       );
 
       setQuotation((prev) => ({

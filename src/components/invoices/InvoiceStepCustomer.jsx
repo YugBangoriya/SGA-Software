@@ -1,4 +1,6 @@
-// SGA — Last updated: Added "Unnamed Customer / Cash Memo" option alongside Create New Customer
+// SGA — Last updated: Feature 1 — "Create New Customer" and "Unnamed Customer" buttons
+// moved to the TOP of the customer selection step (above the search input and customer list)
+// so they are immediately visible without scrolling.
 // ============================================================
 // InvoiceStepCustomer.jsx — Step 1: Customer Selector
 // Phase 4 — Shree Ganesh Automobile
@@ -26,7 +28,6 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
 
   const isDark = darkMode;
   const bg = isDark ? "#2A2A2A" : "#FFFFFF";
-  const cardBg = isDark ? "#1A1A1A" : "#F5F0EE";
   const border = isDark ? "#3A3A3A" : "#E8E2DF";
   const textPrimary = isDark ? "#E8E8E8" : "#222222";
   const textSecondary = isDark ? "#999999" : "#666666";
@@ -295,8 +296,81 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
   // ── Search & select ────────────────────────────────────
   return (
     <div>
+
+      {/* ── ACTION BUTTONS — moved to TOP (Feature 1) ─────────────────
+          "Create New Customer" and "Unnamed Customer" are now the first
+          things the user sees, making both quick-options immediately
+          accessible without needing to scroll past the customer list.
+      ──────────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          marginBottom: 14,
+          paddingBottom: 14,
+          borderBottom: `1px solid ${border}`,
+        }}
+      >
+        {/* Create New Customer */}
+        <button
+          onClick={() => navigate("/customers/new")}
+          style={{
+            flex: 1,
+            minWidth: 140,
+            background: "none",
+            border: `1.5px solid #661F1F`,
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontWeight: 700,
+            fontSize: 13,
+            color: "#661F1F",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            fontFamily: "inherit",
+            transition: "all 0.15s",
+            minHeight: 44,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#FDF8F8"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+        >
+          <UserPlus size={14} /> Create New Customer
+        </button>
+
+        {/* Unnamed / Cash Memo */}
+        <button
+          onClick={selectUnnamed}
+          style={{
+            flex: 1,
+            minWidth: 140,
+            background: "none",
+            border: `1.5px solid #4A6CF7`,
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontWeight: 700,
+            fontSize: 13,
+            color: "#4A6CF7",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            fontFamily: "inherit",
+            transition: "all 0.15s",
+            minHeight: 44,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? "#1A1A2A" : "#F0F4FF"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+        >
+          <Receipt size={14} /> Unnamed Customer
+        </button>
+      </div>
+
       {/* Search input */}
-      <div style={{ position: "relative", marginBottom: 16 }}>
+      <div style={{ position: "relative", marginBottom: 12 }}>
         <Search
           size={16}
           color="#888"
@@ -350,28 +424,7 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: "30px 0", color: textSecondary }}>
-            <div style={{ marginBottom: 12 }}>
-              {search ? "No customers match your search." : "No customers found in the system."}
-            </div>
-            <button
-              onClick={() => navigate("/customers/new")}
-              style={{
-                background: "#661F1F",
-                color: "#FFFFFF",
-                border: "none",
-                borderRadius: 8,
-                padding: "10px 18px",
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontFamily: "inherit",
-              }}
-            >
-              <UserPlus size={15} /> Create New Customer
-            </button>
+            {search ? "No customers match your search." : "No customers found in the system."}
           </div>
         ) : (
           filtered.map((customer) => (
@@ -436,82 +489,6 @@ export default function InvoiceStepCustomer({ data, onChange, darkMode }) {
           ))
         )}
       </div>
-
-      {/* Bottom action buttons: Create New Customer + Unnamed Customer */}
-      {!loading && (
-        <div
-          style={{
-            marginTop: 14,
-            paddingTop: 12,
-            borderTop: `1px solid ${border}`,
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          {/* Create New Customer */}
-          <button
-            onClick={() => navigate("/customers/new")}
-            style={{
-              flex: 1,
-              minWidth: 140,
-              background: "none",
-              border: `1.5px solid #661F1F`,
-              borderRadius: 8,
-              padding: "10px 12px",
-              fontWeight: 700,
-              fontSize: 13,
-              color: "#661F1F",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
-              fontFamily: "inherit",
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#FDF8F8";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "none";
-            }}
-          >
-            <UserPlus size={14} /> Create New Customer
-          </button>
-
-          {/* Unnamed / Cash Memo */}
-          <button
-            onClick={selectUnnamed}
-            style={{
-              flex: 1,
-              minWidth: 140,
-              background: "none",
-              border: `1.5px solid #4A6CF7`,
-              borderRadius: 8,
-              padding: "10px 12px",
-              fontWeight: 700,
-              fontSize: 13,
-              color: "#4A6CF7",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
-              fontFamily: "inherit",
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = isDark ? "#1A1A2A" : "#F0F4FF";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "none";
-            }}
-          >
-            <Receipt size={14} /> Unnamed Customer
-          </button>
-        </div>
-      )}
     </div>
   );
 }

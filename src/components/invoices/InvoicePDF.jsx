@@ -1,8 +1,11 @@
-// SGA — Last updated: Fixed business settings field names to match /settings/main schema —
-// businessLogoUrl (was hardcoded LOGO_BASE64 fallback added), businessName (now dynamic),
-// businessPhone (was biz.phone), businessAddress (was biz.address),
-// invoiceTermsAndConditions (was biz.termsAndConditions). Phone now displays below
-// business name in the header (Feature 1).
+// SGA — Last updated: Logo rendering — LOGO_BASE64 is now the safety-net fallback
+// only. enrichSettingsWithLogo() in invoiceHelpers.jsx is the single source of truth:
+// it pre-fetches the Firebase Storage logo URL and converts it to base64 before passing
+// businessSettings here. Under normal operation, biz.businessLogoUrl will always be a
+// valid base64 string. The || LOGO_BASE64 guard on the <Image> tag is retained as a
+// defence-in-depth safety net for any scenario where the PDF is rendered without the
+// pre-fetch step (e.g. unit tests, direct instantiation). Prior fix retained:
+// businessName, businessPhone, businessAddress, invoiceTermsAndConditions now dynamic.
 // ============================================================
 // InvoicePDF.jsx — @react-pdf/renderer Invoice Template
 // Phase 4 — Shree Ganesh Automobile

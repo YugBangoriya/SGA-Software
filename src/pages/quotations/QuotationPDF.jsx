@@ -1,8 +1,9 @@
-// SGA — Last updated: Three fixes — (1) "Invalid Date" resolved: fmtDate gracefully
-// handles Firestore serverTimestamp sentinel by falling back to today's date.
-// (2) Total Amount section removed entirely from the PDF.
-// (3) "FULL GRID" / "FULL TABLE" green badge removed from section headers —
-// customers only need to see the table content, not internal metadata.
+// SGA — Last updated: Feature 2 + Feature 3 — Link box redesigned as a split
+// left/right panel (car media left, Connect With Us right with platform badges)
+// and moved from the bottom of the PDF to appear between Customer Details and
+// the Kit Company price tables. Platform badges use colored inline views
+// (IG=pink, FB=blue, GM=red) since @react-pdf/renderer cannot load external icon URLs.
+// Prior fixes retained: fmtDate sentinel guard; FULL GRID badge removed; Total removed.
 // src/pages/quotations/QuotationPDF.jsx
 
 import React from "react";
@@ -28,6 +29,10 @@ const C = {
   amber:         "#CC6600",
   amberLight:    "#FFF8E8",
   altRow:        "#F9F5F5",
+  // Platform badge colours
+  igPink:        "#E1306C",
+  fbBlue:        "#1877F2",
+  mapsRed:       "#DB4437",
 };
 
 const SECTION_LABELS = {
@@ -77,11 +82,9 @@ const styles = StyleSheet.create({
   infoValue:    { fontSize: 9, color: C.nearBlack, flex: 1, fontFamily: "Helvetica-Bold" },
 
   // ── Section header label (above each table) ───────────────────────────────
-  // NOTE: No badge rendered here anymore — customers don't need to see
-  // whether it is "full grid" or "selected rows".
-  sectionHeader:     {
-    flexDirection:  "row",
-    alignItems:     "center",
+  sectionHeader: {
+    flexDirection:   "row",
+    alignItems:      "center",
     backgroundColor: C.burgundy,
     borderRadius:    4,
     paddingVertical: 5,
@@ -90,9 +93,9 @@ const styles = StyleSheet.create({
     marginBottom:    2,
   },
   sectionHeaderText: {
-    fontSize:    8.5,
-    fontFamily:  "Helvetica-Bold",
-    color:       C.white,
+    fontSize:      8.5,
+    fontFamily:    "Helvetica-Bold",
+    color:         C.white,
     textTransform: "uppercase",
     letterSpacing: 1,
   },
@@ -108,7 +111,6 @@ const styles = StyleSheet.create({
   cellMono:       { fontSize: 9.5, color: C.nearBlack, fontFamily: "Courier" },
 
   // ── GRID table ─────────────────────────────────────────────────────────────
-  // Column header row
   gridColHeaderRow:        { flexDirection: "row" },
   gridColHeaderCell:       { flex: 1, paddingVertical: 5, paddingHorizontal: 4, borderWidth: 0.5, borderColor: C.burgundyLight, alignItems: "center" },
   gridColHeaderCellFilled: { backgroundColor: C.burgundy },
@@ -116,8 +118,6 @@ const styles = StyleSheet.create({
   gridColHeaderText:       { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.white, textAlign: "center" },
   gridColHeaderTextEmpty:  { fontSize: 8, color: C.gray, textAlign: "center" },
   gridCornerCell:          { flex: 1, paddingVertical: 5, paddingHorizontal: 4, borderWidth: 0.5, borderColor: C.burgundyLight, backgroundColor: C.burgundy },
-
-  // Data rows
   gridDataRow:             { flexDirection: "row" },
   gridDataRowAlt:          { backgroundColor: C.altRow },
   gridRowHeaderCell:       { flex: 1, paddingVertical: 5, paddingHorizontal: 4, borderWidth: 0.5, borderColor: C.lightTaupe, justifyContent: "center" },
@@ -141,20 +141,55 @@ const styles = StyleSheet.create({
   notesTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.burgundy, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   notesText:  { fontSize: 9, color: C.nearBlack, lineHeight: 1.5 },
 
-  // ── Car media ──────────────────────────────────────────────────────────────
-  carMediaBox:   { backgroundColor: C.offWhite, borderRadius: 6, padding: 10, marginBottom: 12 },
-  carMediaTitle: { fontSize: 9, fontFamily: "Helvetica-Bold", color: C.burgundy, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
-  carMediaRow:   { flexDirection: "row", alignItems: "flex-start", marginBottom: 4, gap: 6 },
-  carMediaLbl:   { fontSize: 9, color: C.gray, width: 80 },
-  carMediaLink:  { fontSize: 9, color: C.blue, flex: 1, textDecoration: "underline" },
-
-  // ── Social links ───────────────────────────────────────────────────────────
-  socialSection: { borderTopWidth: 1, borderTopColor: C.lightTaupe, paddingTop: 10, marginTop: 6 },
-  socialTitle:   { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.burgundy, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
-  socialRow:     { flexDirection: "row", gap: 16, flexWrap: "wrap" },
-  socialLinkWrap:{ flexDirection: "row", alignItems: "center", gap: 4 },
-  socialPlatform:{ fontSize: 8, color: C.gray },
-  socialLink:    { fontSize: 8.5, color: C.blue, textDecoration: "underline" },
+  // ── Combined Link Box (Feature 2 + Feature 3) ─────────────────────────────
+  // NEW: Split left/right panel — car media left, Connect With Us right.
+  // Placed BEFORE the price tables (between customer info and Kit Company).
+  linkBoxContainer: {
+    flexDirection:   "row",
+    borderWidth:     1,
+    borderColor:     C.lightTaupe,
+    borderRadius:    6,
+    backgroundColor: C.offWhite,
+    marginBottom:    14,
+    overflow:        "hidden",
+  },
+  linkBoxLeft: {
+    flex:            1,
+    padding:         10,
+    borderRightWidth:1,
+    borderRightColor:C.lightTaupe,
+  },
+  linkBoxRight: {
+    flex:            1,
+    padding:         10,
+  },
+  linkBoxTitle: {
+    fontSize:      8,
+    fontFamily:    "Helvetica-Bold",
+    color:         C.burgundy,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom:  7,
+  },
+  // Car media rows (left panel)
+  carMediaRow:  { flexDirection: "row", alignItems: "flex-start", marginBottom: 5, gap: 5 },
+  carMediaLbl:  { fontSize: 8.5, color: C.gray, width: 75 },
+  carMediaLink: { fontSize: 8.5, color: C.blue, flex: 1, textDecoration: "underline" },
+  // Social rows (right panel)
+  socialRow:    { flexDirection: "row", alignItems: "center", marginBottom: 6, gap: 6 },
+  socialLink:   { fontSize: 8.5, color: C.blue, textDecoration: "underline", flex: 1 },
+  // Platform badge (coloured square label replacing external icon)
+  platformBadge: {
+    paddingVertical:   2,
+    paddingHorizontal: 5,
+    borderRadius:      3,
+    flexShrink:        0,
+  },
+  platformBadgeText: {
+    fontSize:   7,
+    fontFamily: "Helvetica-Bold",
+    color:      C.white,
+  },
 
   // ── Footer ─────────────────────────────────────────────────────────────────
   footer:     { position: "absolute", bottom: 22, left: 44, right: 44, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 0.5, borderTopColor: C.warmGray, paddingTop: 7 },
@@ -168,47 +203,198 @@ function fmtINR(n) {
   return `Rs.${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
 }
 
-// FIX: "Invalid Date" — serverTimestamp() is a Firestore sentinel that has no
-// .toDate() method when immediately returned from createQuotation before Firestore
-// resolves it server-side. We now fall back to today's date in that case.
 function fmtDate(ts) {
   try {
     if (!ts) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    // Firestore Timestamp object
     if (typeof ts.toDate === "function") {
       const d = ts.toDate();
       if (!isNaN(d.getTime())) return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     }
-    // JS Date or number or string
     const d = new Date(ts);
     if (!isNaN(d.getTime())) return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    // Last resort: today
     return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   } catch {
     return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   }
 }
 
+// ─── Platform Badge ────────────────────────────────────────────────────────────
+// Inline coloured label used as a platform logo substitute.
+// @react-pdf/renderer cannot load external icon URLs, so we use a coloured
+// rounded rectangle with abbreviated text instead.
+function PlatformBadge({ label, color }) {
+  return (
+    <View style={[styles.platformBadge, { backgroundColor: color }]}>
+      <Text style={styles.platformBadgeText}>{label}</Text>
+    </View>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  COMBINED LINK BOX — Feature 2 + Feature 3
+//
+//  Layout (split left / right):
+//  ┌──────────────────────┬────────────────────────┐
+//  │ Car Media & Reference│  Connect With Us        │
+//  │  Photos & Images     │  [IG] Visit Instagram   │
+//  │   View on Drive      │  [FB] Visit Facebook    │
+//  │  Installation Video  │  [GM] Find on Maps      │
+//  │   Watch on Instagram │                         │
+//  └──────────────────────┴────────────────────────┘
+//
+//  • Shows only when at least one car media link OR one social link is present.
+//  • If no car media: left panel is hidden, right panel takes full width.
+//  • If no social links: right panel is hidden, left panel takes full width.
+//  • Placement: between Customer/Vehicle info grid and the price tables.
+// ══════════════════════════════════════════════════════════════════════════════
+function CombinedLinkBox({ quotation, businessSettings: s }) {
+  const hasMedia    = !!(quotation.carDriveLink || (quotation.carReelLinks || []).length > 0);
+  const hasSocial   = !!(s.instagramUrl || s.facebookUrl || s.googleMapsUrl);
+
+  if (!hasMedia && !hasSocial) return null;
+
+  // Both panels present → split layout
+  if (hasMedia && hasSocial) {
+    return (
+      <View style={styles.linkBoxContainer}>
+        {/* LEFT — car media */}
+        <View style={styles.linkBoxLeft}>
+          <Text style={styles.linkBoxTitle}>
+            {quotation.vehicleCompany} {quotation.vehicleModel} – Media
+          </Text>
+          {quotation.carDriveLink && (
+            <View style={styles.carMediaRow}>
+              <Text style={styles.carMediaLbl}>Photos &amp; Images</Text>
+              <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
+                View on Google Drive
+              </Link>
+            </View>
+          )}
+          {(quotation.carReelLinks || []).map((url, i) => (
+            <View key={i} style={styles.carMediaRow}>
+              <Text style={styles.carMediaLbl}>Installation Video {i + 1}</Text>
+              <Link src={url} style={styles.carMediaLink}>
+                Watch on Instagram
+              </Link>
+            </View>
+          ))}
+        </View>
+
+        {/* RIGHT — Connect With Us */}
+        <View style={styles.linkBoxRight}>
+          <Text style={styles.linkBoxTitle}>Connect With Us</Text>
+          {s.instagramUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="IG" color={C.igPink} />
+              <Link src={s.instagramUrl} style={styles.socialLink}>
+                Visit Instagram Page
+              </Link>
+            </View>
+          )}
+          {s.facebookUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="FB" color={C.fbBlue} />
+              <Link src={s.facebookUrl} style={styles.socialLink}>
+                Visit Facebook Page
+              </Link>
+            </View>
+          )}
+          {s.googleMapsUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="GM" color={C.mapsRed} />
+              <Link src={s.googleMapsUrl} style={styles.socialLink}>
+                Find Us on Google Maps
+              </Link>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Only car media (no social links) → full-width left panel
+  if (hasMedia && !hasSocial) {
+    return (
+      <View style={[styles.linkBoxContainer, { flexDirection: "column" }]}>
+        <View style={{ padding: 10 }}>
+          <Text style={styles.linkBoxTitle}>
+            {quotation.vehicleCompany} {quotation.vehicleModel} – Media &amp; Reference
+          </Text>
+          {quotation.carDriveLink && (
+            <View style={styles.carMediaRow}>
+              <Text style={styles.carMediaLbl}>Photos &amp; Images</Text>
+              <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
+                View on Google Drive
+              </Link>
+            </View>
+          )}
+          {(quotation.carReelLinks || []).map((url, i) => (
+            <View key={i} style={styles.carMediaRow}>
+              <Text style={styles.carMediaLbl}>Installation Video {i + 1}</Text>
+              <Link src={url} style={styles.carMediaLink}>
+                Watch on Instagram
+              </Link>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  // Only social links (no car media) → full-width right panel
+  return (
+    <View style={[styles.linkBoxContainer, { flexDirection: "column" }]}>
+      <View style={{ padding: 10 }}>
+        <Text style={styles.linkBoxTitle}>Connect With Us</Text>
+        <View style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }}>
+          {s.instagramUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="IG" color={C.igPink} />
+              <Link src={s.instagramUrl} style={styles.socialLink}>
+                Visit Instagram Page
+              </Link>
+            </View>
+          )}
+          {s.facebookUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="FB" color={C.fbBlue} />
+              <Link src={s.facebookUrl} style={styles.socialLink}>
+                Visit Facebook Page
+              </Link>
+            </View>
+          )}
+          {s.googleMapsUrl && (
+            <View style={styles.socialRow}>
+              <PlatformBadge label="GM" color={C.mapsRed} />
+              <Link src={s.googleMapsUrl} style={styles.socialLink}>
+                Find Us on Google Maps
+              </Link>
+            </View>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  GRID TABLE RENDERER
-//  • Column headers with content → Deep Burgundy (#661F1F) bg, white bold text
-//  • Row headers with content    → Medium Burgundy (#8B3A3A) bg, white bold text
-//  • Empty / unnamed headers     → light taupe bg, gray text (normal cell)
-//  • Data cells                  → alternating white / off-white, monospace
 // ══════════════════════════════════════════════════════════════════════════════
 function GridTable({ gridColumns = [], gridRows = [] }) {
   if (gridColumns.length === 0 || gridRows.length === 0) return null;
-
   const hasColHeaders = gridColumns.some((c) => c.header?.trim());
   const hasRowHeaders = gridRows.some((r)  => r.header?.trim());
   const rowHdrFlex    = hasRowHeaders ? 1.4 : 0;
 
   return (
     <View>
-      {/* Column header row */}
       {hasColHeaders && (
         <View style={styles.gridColHeaderRow}>
-          {hasRowHeaders && <View style={[styles.gridCornerCell, { flex: rowHdrFlex }]}><Text style={styles.gridColHeaderText}> </Text></View>}
+          {hasRowHeaders && (
+            <View style={[styles.gridCornerCell, { flex: rowHdrFlex }]}>
+              <Text style={styles.gridColHeaderText}> </Text>
+            </View>
+          )}
           {gridColumns.map((col) => {
             const filled = col.header?.trim();
             return (
@@ -219,8 +405,6 @@ function GridTable({ gridColumns = [], gridRows = [] }) {
           })}
         </View>
       )}
-
-      {/* Data rows */}
       {gridRows.map((row, ri) => {
         const isAlt     = ri % 2 !== 0;
         const rowFilled = row.header?.trim();
@@ -268,8 +452,6 @@ function ListTable({ items = [] }) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  SECTIONS RENDERER
-//  FIX: Section header no longer includes the FULL GRID / FULL TABLE badge.
-//  Customers only need to see the table content, not internal labels.
 // ══════════════════════════════════════════════════════════════════════════════
 function SectionsRenderer({ sections, labourCost }) {
   return (
@@ -277,7 +459,6 @@ function SectionsRenderer({ sections, labourCost }) {
       {SECTION_ORDER.map((key) => {
         const section = sections[key];
         if (!section) return null;
-
         const isGrid       = section.tableMode === "grid";
         const shareFullTbl = section.shareFullTable;
 
@@ -285,15 +466,12 @@ function SectionsRenderer({ sections, labourCost }) {
           const cols = section.gridColumns || [];
           const rows = section.gridRows    || [];
           if (cols.length === 0 || rows.length === 0) return null;
-
           const visibleRows = shareFullTbl
             ? rows
             : rows.filter((r) => (section.selectedItems || []).some((s) => s.id === r.id));
           if (visibleRows.length === 0) return null;
-
           return (
             <View key={key}>
-              {/* Section label — NO badge, clean header only */}
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionHeaderText}>{SECTION_LABELS[key] || key}</Text>
               </View>
@@ -302,13 +480,10 @@ function SectionsRenderer({ sections, labourCost }) {
           );
         }
 
-        // List mode
         const pool = shareFullTbl ? (section.allItems || []) : (section.selectedItems || []);
         if (pool.length === 0) return null;
-
         return (
           <View key={key}>
-            {/* Section label — NO badge */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionHeaderText}>{SECTION_LABELS[key] || key}</Text>
             </View>
@@ -317,7 +492,6 @@ function SectionsRenderer({ sections, labourCost }) {
         );
       })}
 
-      {/* Labour */}
       {Number(labourCost) > 0 && (
         <View style={styles.labourRow}>
           <Text style={[styles.labourLabel, styles.cellDesc]}>Labour / Installation Charges</Text>
@@ -372,13 +546,19 @@ const EM_LABELS = {
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  EXPORTED PDF DOCUMENT
-//  REMOVED: Grand Total section — client confirmed quotations should only
-//  show the price tables, without a highlighted total at the bottom.
+//
+//  Page order (Feature 3 — link box placement change):
+//   1. Header (business info + quotation number/date)
+//   2. Customer + Vehicle info grid
+//   3. ★ CombinedLinkBox ← MOVED HERE (was at the bottom after price tables)
+//   4. Price tables (SectionsRenderer or LegacyRenderer)
+//   5. Disclaimer
+//   6. Notes (tableNote)
+//   7. Footer (fixed, every page)
 // ══════════════════════════════════════════════════════════════════════════════
 export function QuotationPDFDocument({ quotation, businessSettings }) {
   const s         = businessSettings || {};
   const useNewFmt = !!(quotation.sections);
-  const hasMedia  = quotation.carDriveLink || (quotation.carReelLinks || []).length > 0;
   const emLabel   = quotation.emissionCategory
     ? (EM_LABELS[quotation.emissionCategory] || quotation.emissionCategory)
     : null;
@@ -391,10 +571,12 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
     >
       <Page size="A4" style={styles.page}>
 
-        {/* ── Header ── */}
+        {/* ── 1. Header ── */}
         <View style={styles.headerRow}>
           <View>
-            {s.businessLogoUrl && <Image src={s.businessLogoUrl} style={styles.businessLogo} />}
+            {s.businessLogoUrl && (
+              <Image src={s.businessLogoUrl} style={styles.businessLogo} />
+            )}
             <Text style={styles.businessName}>{s.businessName || "Shree Ganesh Automobile"}</Text>
             {s.businessPhone   && <Text style={styles.bizInfo}>Ph: {s.businessPhone}</Text>}
             {s.businessAddress && <Text style={styles.bizInfo}>{s.businessAddress}</Text>}
@@ -403,7 +585,6 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           <View style={{ alignItems: "flex-end" }}>
             <Text style={styles.qLabel}>Quotation</Text>
             <Text style={styles.qNumber}>{quotation.quotationNumber}</Text>
-            {/* FIX: fmtDate now safely handles Firestore sentinel timestamps */}
             <Text style={styles.qDate}>Date: {fmtDate(quotation.createdAt)}</Text>
             {emLabel && (
               <View style={styles.emBadge}>
@@ -413,7 +594,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </View>
         </View>
 
-        {/* ── Customer + Vehicle info ── */}
+        {/* ── 2. Customer + Vehicle info grid ── */}
         <View style={styles.infoGrid}>
           <View style={styles.infoBox}>
             <Text style={styles.infoBoxTitle}>Customer Details</Text>
@@ -447,17 +628,19 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </View>
         </View>
 
-        {/* ── Price tables ── */}
+        {/* ── 3. Combined Link Box (Feature 3: placement BEFORE price tables) ──
+            Contains car media links (left) and Connect With Us (right).
+            Redesigned as a split layout with platform badges (Feature 2).
+            Only renders if at least one link type is present.
+        ── */}
+        <CombinedLinkBox quotation={quotation} businessSettings={s} />
+
+        {/* ── 4. Price tables ── */}
         {useNewFmt
           ? <SectionsRenderer sections={quotation.sections} labourCost={quotation.labourCost} />
           : <LegacyRenderer   lineItems={quotation.lineItems} labourCost={quotation.labourCost} />}
 
-        {/* ── TOTAL AMOUNT: REMOVED ──────────────────────────────────────────
-            Client confirmed the quotation should only show the price tables.
-            No total amount is displayed or highlighted.
-        ─────────────────────────────────────────────────────────────────── */}
-
-        {/* ── Disclaimer ── */}
+        {/* ── 5. Disclaimer ── */}
         <View style={styles.disclaimer}>
           <Text style={styles.disclaimerText}>
             Note: Prices are subject to change. Please contact us for the latest pricing.
@@ -465,7 +648,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </Text>
         </View>
 
-        {/* ── Notes (tableNote from Manage Quotations) ── */}
+        {/* ── 6. Notes (tableNote from Manage Quotations) ── */}
         {quotation.tableNote ? (
           <View style={styles.notesBox}>
             <Text style={styles.notesTitle}>Notes</Text>
@@ -473,53 +656,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </View>
         ) : null}
 
-        {/* ── Car media links ── */}
-        {hasMedia && (
-          <View style={styles.carMediaBox}>
-            <Text style={styles.carMediaTitle}>
-              {quotation.vehicleCompany} {quotation.vehicleModel} – Media &amp; Reference
-            </Text>
-            {quotation.carDriveLink && (
-              <View style={styles.carMediaRow}>
-                <Text style={styles.carMediaLbl}>Photos &amp; Images</Text>
-                <Link src={quotation.carDriveLink} style={styles.carMediaLink}>View on Google Drive</Link>
-              </View>
-            )}
-            {(quotation.carReelLinks || []).map((url, i) => (
-              <View key={i} style={styles.carMediaRow}>
-                <Text style={styles.carMediaLbl}>Installation Video {i + 1}</Text>
-                <Link src={url} style={styles.carMediaLink}>Watch on Instagram</Link>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── Social links ── */}
-        <View style={styles.socialSection}>
-          <Text style={styles.socialTitle}>Connect With Us</Text>
-          <View style={styles.socialRow}>
-            {s.instagramUrl && (
-              <View style={styles.socialLinkWrap}>
-                <Text style={styles.socialPlatform}>Instagram:</Text>
-                <Link src={s.instagramUrl} style={styles.socialLink}>{s.instagramUrl}</Link>
-              </View>
-            )}
-            {s.facebookUrl && (
-              <View style={styles.socialLinkWrap}>
-                <Text style={styles.socialPlatform}>Facebook:</Text>
-                <Link src={s.facebookUrl} style={styles.socialLink}>{s.facebookUrl}</Link>
-              </View>
-            )}
-            {s.googleMapsUrl && (
-              <View style={styles.socialLinkWrap}>
-                <Text style={styles.socialPlatform}>Location:</Text>
-                <Link src={s.googleMapsUrl} style={styles.socialLink}>Find us on Google Maps</Link>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── Footer ── */}
+        {/* ── 7. Footer (fixed — appears on every page) ── */}
         <View style={styles.footer} fixed>
           <Text style={styles.footerLeft}>
             {s.businessName || "Shree Ganesh Automobile"}

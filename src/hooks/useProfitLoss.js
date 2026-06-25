@@ -1,12 +1,24 @@
+// SGA — Last updated: Bug Fix — Three field name corrections:
+// (1) query field 'approvalStatus' → 'status' (invoiceStore writes status:'APPROVED' not approvalStatus)
+// (2) item.unitPrice → item.sellingPrice (InvoiceStepItems saves sellingPrice, not unitPrice)
+// (3) item.itemName → item.name (InvoiceStepItems saves name, not itemName)
+// Also fixed: orderBy removed from Firestore query (invoiceDate is a string, not Timestamp;
+// sorting is now done in JS). Date range filtering also corrected to use invoiceDate string.
 /**
  * useProfitLoss.js
  * Calculates per-item and per-invoice profit/loss from approved invoices.
  *
  * Data sources:
- *   /invoices  — items[], labourCost, totalAmount, approvalStatus, date, customerName, vehicleNo, invoiceNo
+ *   /invoices  — items[], labourCost, totalAmount, status, invoiceDate, customerName, vehicleNo, invoiceNo
  *   /inventory — itemName, purchasePrice (used as cost basis)
  *
- * An "approved" invoice is one with approvalStatus === 'APPROVED' (set by Phase 4 workflow).
+ * An "approved" invoice is one with status === 'APPROVED' (set by the Phase 4 approval workflow).
+ *
+ * FIELD NAME CORRECTIONS (v1.5 bug fix):
+ *   • invoices use status:'APPROVED' — NOT approvalStatus:'APPROVED'
+ *   • invoice items use sellingPrice — NOT unitPrice
+ *   • invoice items use name         — NOT itemName
+ *   • invoice date is stored as invoiceDate (YYYY-MM-DD string) — NOT a Timestamp field 'date'
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -15,8 +27,6 @@ import {
   query,
   where,
   getDocs,
-  orderBy,
-  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -39,23 +49,33 @@ export function useProfitLoss(startDate = null, endDate = null) {
       setError(null);
 
       // ── 1. Approved invoices ─────────────────────────────────────────────
-      let invConstraints = [
-        where('approvalStatus', '==', 'APPROVED'),
-        orderBy('date', 'desc'),
-      ];
+      // FIX: invoiceStore.js saves the field as 'status', not 'approvalStatus'.
+      // Querying 'approvalStatus' returned 0 documents, making all P&L values 0.
+      const invoiceSnap = await getDocs(
+        query(
+          collection(db, 'invoices'),
+          where('status', '==', 'APPROVED'),
+        )
+      );
+
+      let invoices = invoiceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      // ── Date range filtering (JS-level, since invoiceDate is a YYYY-MM-DD string) ──
       if (startDate) {
-        invConstraints.push(where('date', '>=', Timestamp.fromDate(startDate)));
+        const startStr = startDate.toISOString().split('T')[0];
+        invoices = invoices.filter((inv) => (inv.invoiceDate || '') >= startStr);
       }
       if (endDate) {
-        const endOfDay = new Date(endDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        invConstraints.push(where('date', '<=', Timestamp.fromDate(endOfDay)));
+        const endStr = endDate.toISOString().split('T')[0];
+        invoices = invoices.filter((inv) => (inv.invoiceDate || '') <= endStr);
       }
 
-      const invoiceSnap = await getDocs(
-        query(collection(db, 'invoices'), ...invConstraints)
-      );
-      const invoices = invoiceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Sort by invoiceDate descending in JS
+      invoices.sort((a, b) => {
+        const da = a.invoiceDate || '';
+        const db_ = b.invoiceDate || '';
+        return db_ > da ? 1 : db_ < da ? -1 : 0;
+      });
 
       // ── 2. Inventory purchase prices (cost basis) ────────────────────────
       const inventorySnap = await getDocs(collection(db, 'inventory'));
@@ -74,17 +94,18 @@ export function useProfitLoss(startDate = null, endDate = null) {
         let invoiceCost    = 0;
 
         (inv.items || []).forEach((item) => {
-          const key        = normaliseKey(item.itemName);
-          const qty        = Number(item.quantity)  || 0;
-          const sellPrice  = Number(item.unitPrice) || 0;
-          const costPrice  = costMap[key]            || 0;
+          // FIX: items use 'name' (not 'itemName') and 'sellingPrice' (not 'unitPrice')
+          const key        = normaliseKey(item.name);
+          const qty        = Number(item.quantity)     || 0;
+          const sellPrice  = Number(item.sellingPrice) || 0;   // FIX: was item.unitPrice
+          const costPrice  = costMap[key]               || 0;
 
           invoiceRevenue += sellPrice * qty;
           invoiceCost    += costPrice  * qty;
 
           if (!itemMap[key]) {
             itemMap[key] = {
-              itemName:      item.itemName,
+              itemName:      item.name,                // FIX: was item.itemName
               purchasePrice: costPrice,
               totalQtySold:  0,
               totalRevenue:  0,
@@ -110,9 +131,9 @@ export function useProfitLoss(startDate = null, endDate = null) {
         return {
           id:           inv.id,
           invoiceNo:    inv.invoiceNo    || '—',
-          customerName: inv.customerName || '—',
-          vehicleNo:    inv.vehicleNo    || '—',
-          date:         inv.date,
+          customerName: inv.customerName || (inv.customerSnapshot?.name) || '—',
+          vehicleNo:    inv.vehicleNo    || (inv.vehicleSnapshot?.registrationNo) || '—',
+          date:         inv.invoiceDate,   // FIX: was inv.date; field is actually invoiceDate
           paymentStatus:inv.paymentStatus || '',
           revenue:      invoiceRevenue,
           cost:         invoiceCost,

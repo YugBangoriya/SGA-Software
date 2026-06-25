@@ -1,33 +1,23 @@
-// SGA — Last updated: Bug Fix — Added /docsCategories rule (was missing — caused "Missing or
-// insufficient permissions" for Owner/SuperAdmin when creating categories in Docs Repository).
-// Added /docsFolders rule for new nested folder structure in Docs Repository redesign.
-// Added /quotationPriceTables rule for new Manage Quotations price table feature.
+// SGA — Last updated: Bug Fix — Owner can now write to systemConfig/quotationCounter
+// (generateQuotationNumber() uses a Firestore transaction on that document;
+// previously the rule only allowed isSuperAdmin() to write to systemConfig,
+// blocking Owner from creating quotations).
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.4 | Docs Category Bug Fix + Quotation Tables + Nested Folders
+// Version: 1.5 | systemConfig quotationCounter Owner write permission fix
 //
-// ── CHANGES FROM v1.3 ────────────────────────────────────────────────────
-//   BUG FIX — /docsCategories had NO rule in v1.3.
-//             useDocsRepository.js stores categories in the "docsCategories"
-//             collection, but firestore.rules only had a rule for
-//             "docsRepository". The catch-all DENY ALL block then silently
-//             denied every read and write to "docsCategories" for ALL roles,
-//             including Owner and SuperAdmin. This produced the
-//             "Missing or insufficient permissions" error shown in the UI
-//             whenever the CategoryManager tried to load or create categories.
-//             Fix: added explicit rule for /docsCategories/{docId} mirroring
-//             the same access model as /docsRepository (Owner+ read/write,
-//             all staff read).
-//
-//   NEW — /docsFolders collection for hierarchical nested folder structure
-//         in Docs Repository. Owner+ can create, rename, delete folders.
-//         All staff can read (needed to navigate folder tree).
-//
-//   NEW — /quotationPriceTables collection for Manage Quotations price
-//         table feature. Owner+ read/write. Superadmin can delete.
+// ── CHANGES FROM v1.4 ────────────────────────────────────────────────────
+//   BUG FIX — /systemConfig/{configId} write was restricted to isSuperAdmin() only.
+//             generateQuotationNumber() in quotationService.js runs a Firestore
+//             transaction that writes to systemConfig/quotationCounter to increment
+//             the sequential quotation number. Owner was blocked from this write,
+//             causing "Failed to save quotation" / permission denied errors.
+//             Fix: added an exception so isOwnerOrAbove() can create/update the
+//             specific document systemConfig/quotationCounter. All other systemConfig
+//             documents remain SuperAdmin-only for write.
 //
 // ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
 //   superadmin  → God-mode. Manages users, backups, car repo, system config.
-//   owner       → Full business access. Cannot touch system config.
+//   owner       → Full business access. Cannot touch system config (except quotationCounter).
 //   employee    → Limited: create pending invoices, view customers/inventory.
 //   (accountant → placeholder, not implemented in v1)
 //
@@ -46,6 +36,7 @@
 //   [✓] docsCategories: Owner+ read/write (v1.4 — BUG FIX)
 //   [✓] docsFolders: Owner+ read/write, all staff read (v1.4)
 //   [✓] quotationPriceTables: Owner+ read/write (v1.4)
+//   [✓] systemConfig/quotationCounter: Owner+ create/update allowed (v1.5 — BUG FIX)
 // ─────────────────────────────────────────────────────────────────────────
 
 rules_version = '2';
@@ -226,11 +217,6 @@ service cloud.firestore {
     // ──────────────────────────────────────────────────────────
     // /docsCategories — Flat category labels for Docs Repository
     // BUG FIX v1.4: This collection was MISSING from the rules.
-    // useDocsRepository.js stores categories here (collection name
-    // "docsCategories"). Without this rule, the catch-all DENY ALL
-    // blocked every read/write, including Owner and SuperAdmin —
-    // causing the "Missing or insufficient permissions" error in
-    // the CategoryManager modal.
     // ──────────────────────────────────────────────────────────
     match /docsCategories/{categoryId} {
       allow read:           if isAnyStaff();
@@ -241,9 +227,6 @@ service cloud.firestore {
     // ──────────────────────────────────────────────────────────
     // /docsFolders — Nested folder hierarchy for Docs Repository
     // NEW in v1.4: enables Windows Explorer-style folder tree.
-    // parentId: null for root folders, folderId string for nested.
-    // All staff can read to navigate the tree.
-    // Owner+ can create, rename, delete folders.
     // ──────────────────────────────────────────────────────────
     match /docsFolders/{folderId} {
       allow read:           if isAnyStaff();
@@ -272,11 +255,23 @@ service cloud.firestore {
 
     // ──────────────────────────────────────────────────────────
     // /systemConfig — SuperAdmin control flags
+    //
+    // BUG FIX v1.5: The quotationCounter document inside systemConfig
+    // is written by generateQuotationNumber() via a Firestore transaction
+    // whenever a quotation is created. Previously this write was blocked
+    // for Owner (only isSuperAdmin() could write to systemConfig), causing
+    // "Failed to save quotation. Please try again." for the Owner role.
+    //
+    // Fix: isOwnerOrAbove() may create/update the specific document
+    // systemConfig/quotationCounter. All other systemConfig documents
+    // (e.g. systemConfig/main which holds invoiceDbLocked) remain
+    // restricted to isSuperAdmin() for write.
     // ──────────────────────────────────────────────────────────
     match /systemConfig/{configId} {
-      allow read:           if isAnyStaff();
-      allow create, update: if isSuperAdmin();
-      allow delete:         if isSuperAdmin();
+      allow read:   if isAnyStaff();
+      allow create, update: if isSuperAdmin()
+                            || (isOwnerOrAbove() && configId == 'quotationCounter');
+      allow delete: if isSuperAdmin();
     }
 
     // ──────────────────────────────────────────────────────────
