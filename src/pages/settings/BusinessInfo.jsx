@@ -1,5 +1,9 @@
-// src/pages/Settings/components/Owner/BusinessInfo.jsx
-// Owner: business name, address, phone, logo upload, social links
+// SGA — Last updated: Feature — Added "Business Website URL" field to Settings
+// Social & Location Links section. Saved as businessWebsiteUrl to Firestore
+// /settings/main. Auto-included in the Quotation PDF "Connect With Us" section
+// the same way Instagram, Facebook, and Google Maps links work.
+// src/pages/settings/BusinessInfo.jsx
+// Owner: business name, address, phone, logo upload, social + website links
 
 import React, { useState, useRef } from "react";
 import { SectionCard, FieldRow, Input, SaveRow, T } from "./SettingsUI";
@@ -10,31 +14,33 @@ export default function BusinessInfo() {
   const { settings, patchSettings } = useSettings();
 
   const [form, setForm] = useState({
-    businessName: settings.businessName || "",
-    businessAddress: settings.businessAddress || "",
-    businessPhone: settings.businessPhone || "",
-    instagramUrl: settings.instagramUrl || "",
-    facebookUrl: settings.facebookUrl || "",
-    googleMapsUrl: settings.googleMapsUrl || "",
+    businessName:       settings.businessName       || "",
+    businessAddress:    settings.businessAddress    || "",
+    businessPhone:      settings.businessPhone      || "",
+    instagramUrl:       settings.instagramUrl       || "",
+    facebookUrl:        settings.facebookUrl        || "",
+    googleMapsUrl:      settings.googleMapsUrl      || "",
+    businessWebsiteUrl: settings.businessWebsiteUrl || "",   // NEW
   });
 
-  // Sync form if settings load after mount
+  // Sync form when settings load after mount
   React.useEffect(() => {
     setForm({
-      businessName: settings.businessName || "",
-      businessAddress: settings.businessAddress || "",
-      businessPhone: settings.businessPhone || "",
-      instagramUrl: settings.instagramUrl || "",
-      facebookUrl: settings.facebookUrl || "",
-      googleMapsUrl: settings.googleMapsUrl || "",
+      businessName:       settings.businessName       || "",
+      businessAddress:    settings.businessAddress    || "",
+      businessPhone:      settings.businessPhone      || "",
+      instagramUrl:       settings.instagramUrl       || "",
+      facebookUrl:        settings.facebookUrl        || "",
+      googleMapsUrl:      settings.googleMapsUrl      || "",
+      businessWebsiteUrl: settings.businessWebsiteUrl || "",  // NEW
     });
   }, [settings.businessName]);
 
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saving,        setSaving]        = useState(false);
+  const [saved,         setSaved]         = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
-  const [logoPreview, setLogoPreview] = useState(settings.businessLogoUrl || "");
-  const [error, setError] = useState("");
+  const [logoPreview,   setLogoPreview]   = useState(settings.businessLogoUrl || "");
+  const [error,         setError]         = useState("");
   const fileRef = useRef(null);
 
   const handleSave = async () => {
@@ -42,7 +48,7 @@ export default function BusinessInfo() {
     setSaving(true);
     setError("");
     try {
-      await saveBusinessInfo(form);
+      await saveBusinessInfo(form);   // businessWebsiteUrl is included in form
       patchSettings(form);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -64,7 +70,6 @@ export default function BusinessInfo() {
       setError("Logo must be under 2 MB.");
       return;
     }
-    // Local preview
     const reader = new FileReader();
     reader.onload = (ev) => setLogoPreview(ev.target.result);
     reader.readAsDataURL(file);
@@ -95,51 +100,21 @@ export default function BusinessInfo() {
         </div>
       )}
 
-      {/* ── Logo Upload ──────────────────────────────────────────────────── */}
+      {/* ── Logo Upload ─────────────────────────────────────────────────── */}
       <FieldRow label="Business Logo" hint="Appears on all invoice and quotation PDFs. PNG/JPG/SVG, max 2 MB.">
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <div
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 10,
-              border: `2px dashed ${T.border}`,
-              background: "#F8F5F3",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              flexShrink: 0,
-            }}
-          >
-            {logoPreview ? (
-              <img src={logoPreview} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-            ) : (
-              <span style={{ fontSize: 28, color: T.textMeta }}>🏭</span>
-            )}
+          <div style={{ width: 80, height: 80, borderRadius: 10, border: `2px dashed ${T.border}`, background: "#F8F5F3", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {logoPreview
+              ? <img src={logoPreview} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              : <span style={{ fontSize: 28, color: T.textMeta }}>🏭</span>
+            }
           </div>
           <div>
-            <input
-              type="file"
-              ref={fileRef}
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-              onChange={handleLogoChange}
-              style={{ display: "none" }}
-            />
+            <input type="file" ref={fileRef} accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoChange} style={{ display: "none" }} />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={logoUploading}
-              style={{
-                background: T.primary,
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                padding: "9px 16px",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: logoUploading ? "wait" : "pointer",
-                fontFamily: "inherit",
-              }}
+              style={{ background: T.primary, color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: logoUploading ? "wait" : "pointer", fontFamily: "inherit" }}
             >
               {logoUploading ? "Uploading…" : logoPreview ? "Change Logo" : "Upload Logo"}
             </button>
@@ -154,33 +129,20 @@ export default function BusinessInfo() {
 
       {/* ── Business Details ─────────────────────────────────────────────── */}
       <FieldRow label="Business Name" required>
-        <Input
-          value={form.businessName}
-          onChange={(v) => setForm({ ...form, businessName: v })}
-          placeholder="Shree Ganesh Automobile"
-        />
+        <Input value={form.businessName} onChange={(v) => setForm({ ...form, businessName: v })} placeholder="Shree Ganesh Automobile" />
       </FieldRow>
 
       <FieldRow label="Address" hint="Full address as it should appear on invoices">
-        <Input
-          value={form.businessAddress}
-          onChange={(v) => setForm({ ...form, businessAddress: v })}
-          placeholder="Shop No. X, Street, City, PIN"
-        />
+        <Input value={form.businessAddress} onChange={(v) => setForm({ ...form, businessAddress: v })} placeholder="Shop No. X, Street, City, PIN" />
       </FieldRow>
 
       <FieldRow label="Phone Number">
-        <Input
-          value={form.businessPhone}
-          onChange={(v) => setForm({ ...form, businessPhone: v })}
-          placeholder="+91 98765 43210"
-          type="tel"
-        />
+        <Input value={form.businessPhone} onChange={(v) => setForm({ ...form, businessPhone: v })} placeholder="+91 98765 43210" type="tel" />
       </FieldRow>
 
       <div style={{ height: 1, background: T.border, margin: "8px 0 16px" }} />
 
-      {/* ── Social Links ─────────────────────────────────────────────────── */}
+      {/* ── Social & Location Links ───────────────────────────────────────── */}
       <div style={{ fontSize: 12, fontWeight: 600, color: T.primary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
         Social & Location Links
       </div>
@@ -189,28 +151,26 @@ export default function BusinessInfo() {
       </div>
 
       <FieldRow label="Instagram Page URL">
-        <Input
-          value={form.instagramUrl}
-          onChange={(v) => setForm({ ...form, instagramUrl: v })}
-          placeholder="https://instagram.com/yourpage"
-          type="url"
-        />
+        <Input value={form.instagramUrl} onChange={(v) => setForm({ ...form, instagramUrl: v })} placeholder="https://instagram.com/yourpage" type="url" />
       </FieldRow>
 
       <FieldRow label="Facebook Page URL">
-        <Input
-          value={form.facebookUrl}
-          onChange={(v) => setForm({ ...form, facebookUrl: v })}
-          placeholder="https://facebook.com/yourpage"
-          type="url"
-        />
+        <Input value={form.facebookUrl} onChange={(v) => setForm({ ...form, facebookUrl: v })} placeholder="https://facebook.com/yourpage" type="url" />
       </FieldRow>
 
       <FieldRow label="Google Maps Link">
+        <Input value={form.googleMapsUrl} onChange={(v) => setForm({ ...form, googleMapsUrl: v })} placeholder="https://maps.google.com/?q=..." type="url" />
+      </FieldRow>
+
+      {/* ── Business Website — NEW ────────────────────────────────────────── */}
+      <FieldRow
+        label="Business Website URL"
+        hint="Optional. Shown in quotation PDFs under 'Connect With Us' alongside Instagram, Facebook, and Google Maps."
+      >
         <Input
-          value={form.googleMapsUrl}
-          onChange={(v) => setForm({ ...form, googleMapsUrl: v })}
-          placeholder="https://maps.google.com/?q=..."
+          value={form.businessWebsiteUrl}
+          onChange={(v) => setForm({ ...form, businessWebsiteUrl: v })}
+          placeholder="https://www.yourwebsite.com"
           type="url"
         />
       </FieldRow>

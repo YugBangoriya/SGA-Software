@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS = {
   instagramUrl: "",
   facebookUrl: "",
   googleMapsUrl: "",
+  businessWebsiteUrl: "",
 
   // GST
   gstNumber: "", // empty = GST hidden everywhere
@@ -113,6 +114,7 @@ export async function saveBusinessInfo(data) {
     instagramUrl: data.instagramUrl,
     facebookUrl: data.facebookUrl,
     googleMapsUrl: data.googleMapsUrl,
+    businessWebsiteUrl: data.businessWebsiteUrl || "",
     updatedAt: serverTimestamp(),
   });
 }

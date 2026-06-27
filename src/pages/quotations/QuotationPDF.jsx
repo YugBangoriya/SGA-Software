@@ -1,9 +1,14 @@
-// SGA — Last updated: Feature 2 + Feature 3 — Link box redesigned as a split
-// left/right panel (car media left, Connect With Us right with platform badges)
-// and moved from the bottom of the PDF to appear between Customer Details and
-// the Kit Company price tables. Platform badges use colored inline views
-// (IG=pink, FB=blue, GM=red) since @react-pdf/renderer cannot load external icon URLs.
-// Prior fixes retained: fmtDate sentinel guard; FULL GRID badge removed; Total removed.
+// SGA — Last updated: Three PDF fixes applied:
+// (1) Header overflow — added flex:1 to left panel and flexShrink:0 to right panel
+//     so "Quotation" heading no longer crowds/overlaps the quotation number.
+// (2) Text rendering — replaced all &amp; HTML entities with plain & character.
+//     @react-pdf/renderer <Text> does not process HTML entities; they rendered
+//     as literal "&amp;" in the generated PDF.
+// (3) Link box redesign — removed coloured badge boxes (IG/FB/GM). Platform
+//     names are now plain Helvetica-Bold text ("Instagram", "Facebook", etc.)
+//     followed by the clickable link, matching the client request.
+// New feature: businessWebsiteUrl now shown in Connect With Us section when set.
+// Placement retained: link box appears between customer info and price tables.
 // src/pages/quotations/QuotationPDF.jsx
 
 import React from "react";
@@ -11,9 +16,7 @@ import {
   Document, Page, Text, View, StyleSheet, Image, Link,
 } from "@react-pdf/renderer";
 
-// Fonts: built-in only — no Font.register() / external URLs
-// Helvetica / Helvetica-Bold / Courier
-
+// Colours — matches SGA design tokens
 const C = {
   burgundy:      "#661F1F",
   burgundyMed:   "#8B3A3A",
@@ -23,16 +26,11 @@ const C = {
   lightTaupe:    "#E8E2DF",
   nearBlack:     "#222222",
   gray:          "#666666",
-  green:         "#1A7A1A",
   blue:          "#0055CC",
   white:         "#FFFFFF",
   amber:         "#CC6600",
   amberLight:    "#FFF8E8",
   altRow:        "#F9F5F5",
-  // Platform badge colours
-  igPink:        "#E1306C",
-  fbBlue:        "#1877F2",
-  mapsRed:       "#DB4437",
 };
 
 const SECTION_LABELS = {
@@ -54,7 +52,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 44,
   },
 
-  // ── Header ───────────────────────────────────────────────────────────────
+  // ── Header ────────────────────────────────────────────────────────────────
+  // FIX: Added flex:1 to left panel and flexShrink:0 to right panel so the
+  // "Quotation" heading no longer overflows into / overlaps the left column.
   headerRow: {
     flexDirection:     "row",
     justifyContent:    "space-between",
@@ -64,16 +64,25 @@ const styles = StyleSheet.create({
     paddingBottom:     14,
     marginBottom:      14,
   },
+  headerLeft: {
+    flex:        1,          // takes all available horizontal space
+    marginRight: 20,         // gap between business info and quotation details
+  },
+  headerRight: {
+    flexShrink:  0,          // never compress — keeps quotation number legible
+    alignItems:  "flex-end",
+    minWidth:    130,
+  },
   businessLogo: { width: 52, height: 52, borderRadius: 4, marginBottom: 6, objectFit: "contain" },
   businessName: { fontSize: 16, fontFamily: "Helvetica-Bold", color: C.burgundy },
   bizInfo:      { fontSize: 8.5, color: C.gray, marginTop: 1 },
   qLabel:       { fontSize: 22, fontFamily: "Helvetica-Bold", color: C.burgundy, letterSpacing: 2 },
-  qNumber:      { fontFamily: "Courier", fontSize: 12, color: C.nearBlack, marginTop: 2 },
-  qDate:        { fontSize: 9, color: C.gray, marginTop: 2 },
+  qNumber:      { fontFamily: "Courier", fontSize: 11, color: C.nearBlack, marginTop: 2 },
+  qDate:        { fontSize: 9,  color: C.gray, marginTop: 2 },
   emBadge:      { marginTop: 4, paddingVertical: 3, paddingHorizontal: 8, backgroundColor: "#E3F2FD", borderRadius: 4 },
   emBadgeText:  { fontSize: 8, color: "#1A3A8A", fontFamily: "Helvetica-Bold" },
 
-  // ── Info grid ─────────────────────────────────────────────────────────────
+  // ── Info grid ──────────────────────────────────────────────────────────────
   infoGrid:     { flexDirection: "row", gap: 12, marginBottom: 14 },
   infoBox:      { flex: 1, backgroundColor: C.offWhite, borderRadius: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: C.burgundy },
   infoBoxTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.burgundy, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
@@ -81,24 +90,9 @@ const styles = StyleSheet.create({
   infoLabel:    { fontSize: 9, color: C.gray, width: 80 },
   infoValue:    { fontSize: 9, color: C.nearBlack, flex: 1, fontFamily: "Helvetica-Bold" },
 
-  // ── Section header label (above each table) ───────────────────────────────
-  sectionHeader: {
-    flexDirection:   "row",
-    alignItems:      "center",
-    backgroundColor: C.burgundy,
-    borderRadius:    4,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    marginTop:       10,
-    marginBottom:    2,
-  },
-  sectionHeaderText: {
-    fontSize:      8.5,
-    fontFamily:    "Helvetica-Bold",
-    color:         C.white,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
+  // ── Section header label ───────────────────────────────────────────────────
+  sectionHeader:     { flexDirection: "row", alignItems: "center", backgroundColor: C.burgundy, borderRadius: 4, paddingVertical: 5, paddingHorizontal: 8, marginTop: 10, marginBottom: 2 },
+  sectionHeaderText: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: C.white, textTransform: "uppercase", letterSpacing: 1 },
 
   // ── LIST table ─────────────────────────────────────────────────────────────
   listHeader:     { flexDirection: "row", backgroundColor: C.burgundyMed, paddingVertical: 5, paddingHorizontal: 8 },
@@ -128,7 +122,7 @@ const styles = StyleSheet.create({
   gridDataCell:            { flex: 1, paddingVertical: 5, paddingHorizontal: 4, borderWidth: 0.5, borderColor: C.lightTaupe, alignItems: "center" },
   gridDataText:            { fontSize: 8.5, color: C.nearBlack, fontFamily: "Courier", textAlign: "center" },
 
-  // ── Labour ────────────────────────────────────────────────────────────────
+  // ── Labour ─────────────────────────────────────────────────────────────────
   labourRow:   { flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 0.5, borderBottomColor: C.lightTaupe, backgroundColor: "#FFF8F8" },
   labourLabel: { flex: 3, fontSize: 9.5, color: C.burgundyMed, fontFamily: "Helvetica-Bold" },
 
@@ -136,32 +130,32 @@ const styles = StyleSheet.create({
   disclaimer:     { backgroundColor: C.amberLight, borderRadius: 5, borderLeftWidth: 3, borderLeftColor: C.amber, padding: 8, marginBottom: 12, marginTop: 10 },
   disclaimerText: { fontSize: 8.5, color: "#7A4400", fontFamily: "Helvetica-Oblique" },
 
-  // ── Notes (tableNote from Manage Quotations) ───────────────────────────────
+  // ── Notes ──────────────────────────────────────────────────────────────────
   notesBox:   { backgroundColor: C.offWhite, borderRadius: 5, borderLeftWidth: 3, borderLeftColor: C.burgundyMed, padding: 10, marginBottom: 14 },
   notesTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.burgundy, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   notesText:  { fontSize: 9, color: C.nearBlack, lineHeight: 1.5 },
 
-  // ── Combined Link Box (Feature 2 + Feature 3) ─────────────────────────────
-  // NEW: Split left/right panel — car media left, Connect With Us right.
-  // Placed BEFORE the price tables (between customer info and Kit Company).
+  // ── Combined Link Box ──────────────────────────────────────────────────────
+  // Placed between customer info and price tables (Feature 3 from prior session).
+  // Redesigned: no badge boxes — platform names are plain bold text (this session).
   linkBoxContainer: {
-    flexDirection:   "row",
-    borderWidth:     1,
-    borderColor:     C.lightTaupe,
-    borderRadius:    6,
-    backgroundColor: C.offWhite,
-    marginBottom:    14,
-    overflow:        "hidden",
+    flexDirection:    "row",
+    borderWidth:      1,
+    borderColor:      C.lightTaupe,
+    borderRadius:     6,
+    backgroundColor:  C.offWhite,
+    marginBottom:     14,
+    overflow:         "hidden",
   },
   linkBoxLeft: {
-    flex:            1,
-    padding:         10,
-    borderRightWidth:1,
-    borderRightColor:C.lightTaupe,
+    flex:             1,
+    padding:          10,
+    borderRightWidth: 1,
+    borderRightColor: C.lightTaupe,
   },
   linkBoxRight: {
-    flex:            1,
-    padding:         10,
+    flex:    1,
+    padding: 10,
   },
   linkBoxTitle: {
     fontSize:      8,
@@ -171,30 +165,21 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom:  7,
   },
-  // Car media rows (left panel)
+  // Car media rows
   carMediaRow:  { flexDirection: "row", alignItems: "flex-start", marginBottom: 5, gap: 5 },
   carMediaLbl:  { fontSize: 8.5, color: C.gray, width: 75 },
   carMediaLink: { fontSize: 8.5, color: C.blue, flex: 1, textDecoration: "underline" },
-  // Social rows (right panel)
+  // Social / link rows — FIX: bold text label replaces the old coloured badge box
   socialRow:    { flexDirection: "row", alignItems: "center", marginBottom: 6, gap: 6 },
+  // Bold platform name (e.g. "Instagram", "Facebook", "Google Maps", "Website")
+  socialLabel:  { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: C.nearBlack, width: 72, flexShrink: 0 },
+  // Clickable link text (e.g. "Visit Instagram Page")
   socialLink:   { fontSize: 8.5, color: C.blue, textDecoration: "underline", flex: 1 },
-  // Platform badge (coloured square label replacing external icon)
-  platformBadge: {
-    paddingVertical:   2,
-    paddingHorizontal: 5,
-    borderRadius:      3,
-    flexShrink:        0,
-  },
-  platformBadgeText: {
-    fontSize:   7,
-    fontFamily: "Helvetica-Bold",
-    color:      C.white,
-  },
 
   // ── Footer ─────────────────────────────────────────────────────────────────
   footer:     { position: "absolute", bottom: 22, left: 44, right: 44, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 0.5, borderTopColor: C.warmGray, paddingTop: 7 },
   footerLeft: { fontSize: 7.5, color: C.gray },
-  footerRight:{ fontSize: 7.5, color: C.gray, fontFamily: "Courier" },
+  footerRight: { fontSize: 7.5, color: C.gray, fontFamily: "Courier" },
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -218,161 +203,105 @@ function fmtDate(ts) {
   }
 }
 
-// ─── Platform Badge ────────────────────────────────────────────────────────────
-// Inline coloured label used as a platform logo substitute.
-// @react-pdf/renderer cannot load external icon URLs, so we use a coloured
-// rounded rectangle with abbreviated text instead.
-function PlatformBadge({ label, color }) {
-  return (
-    <View style={[styles.platformBadge, { backgroundColor: color }]}>
-      <Text style={styles.platformBadgeText}>{label}</Text>
-    </View>
-  );
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
-//  COMBINED LINK BOX — Feature 2 + Feature 3
+//  COMBINED LINK BOX
+//  - Left panel: car media links (Google Drive + Instagram Reels)
+//  - Right panel: "Connect With Us" — Instagram, Facebook, Google Maps, Website
 //
-//  Layout (split left / right):
-//  ┌──────────────────────┬────────────────────────┐
-//  │ Car Media & Reference│  Connect With Us        │
-//  │  Photos & Images     │  [IG] Visit Instagram   │
-//  │   View on Drive      │  [FB] Visit Facebook    │
-//  │  Installation Video  │  [GM] Find on Maps      │
-//  │   Watch on Instagram │                         │
-//  └──────────────────────┴────────────────────────┘
+//  FIX (this session): Removed coloured badge boxes (IG/FB/GM views).
+//  Platform names are now plain Helvetica-Bold text followed by the link.
+//  This renders cleanly in all PDF viewers and matches the client request.
 //
-//  • Shows only when at least one car media link OR one social link is present.
-//  • If no car media: left panel is hidden, right panel takes full width.
-//  • If no social links: right panel is hidden, left panel takes full width.
-//  • Placement: between Customer/Vehicle info grid and the price tables.
+//  FIX (this session): &amp; HTML entity replaced with plain & — @react-pdf/renderer
+//  <Text> does not decode HTML entities; they appeared literally in the PDF.
+//
+//  Placement: between customer/vehicle info and the price tables.
 // ══════════════════════════════════════════════════════════════════════════════
 function CombinedLinkBox({ quotation, businessSettings: s }) {
-  const hasMedia    = !!(quotation.carDriveLink || (quotation.carReelLinks || []).length > 0);
-  const hasSocial   = !!(s.instagramUrl || s.facebookUrl || s.googleMapsUrl);
+  const hasMedia  = !!(quotation.carDriveLink || (quotation.carReelLinks || []).length > 0);
+  const hasSocial = !!(s.instagramUrl || s.facebookUrl || s.googleMapsUrl || s.businessWebsiteUrl);
 
   if (!hasMedia && !hasSocial) return null;
 
-  // Both panels present → split layout
+  // ── Right panel content (shared across layout variants) ─────────────────
+  const ConnectPanel = () => (
+    <View style={hasMedia ? styles.linkBoxRight : { padding: 10 }}>
+      <Text style={styles.linkBoxTitle}>Connect With Us</Text>
+
+      {s.instagramUrl && (
+        <View style={styles.socialRow}>
+          <Text style={styles.socialLabel}>Instagram</Text>
+          <Link src={s.instagramUrl} style={styles.socialLink}>Visit Instagram Page</Link>
+        </View>
+      )}
+      {s.facebookUrl && (
+        <View style={styles.socialRow}>
+          <Text style={styles.socialLabel}>Facebook</Text>
+          <Link src={s.facebookUrl} style={styles.socialLink}>Visit Facebook Page</Link>
+        </View>
+      )}
+      {s.googleMapsUrl && (
+        <View style={styles.socialRow}>
+          <Text style={styles.socialLabel}>Google Maps</Text>
+          <Link src={s.googleMapsUrl} style={styles.socialLink}>Find Us on Google Maps</Link>
+        </View>
+      )}
+      {s.businessWebsiteUrl && (
+        <View style={styles.socialRow}>
+          <Text style={styles.socialLabel}>Website</Text>
+          <Link src={s.businessWebsiteUrl} style={styles.socialLink}>Visit Our Website</Link>
+        </View>
+      )}
+    </View>
+  );
+
+  // ── Left panel content ───────────────────────────────────────────────────
+  const MediaPanel = () => (
+    <View style={styles.linkBoxLeft}>
+      {/* FIX: plain & instead of &amp; — PDF Text does not decode HTML entities */}
+      <Text style={styles.linkBoxTitle}>
+        {quotation.vehicleCompany} {quotation.vehicleModel} - Media
+      </Text>
+      {quotation.carDriveLink && (
+        <View style={styles.carMediaRow}>
+          <Text style={styles.carMediaLbl}>Photos & Images</Text>
+          <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
+            View on Google Drive
+          </Link>
+        </View>
+      )}
+      {(quotation.carReelLinks || []).map((url, i) => (
+        <View key={i} style={styles.carMediaRow}>
+          <Text style={styles.carMediaLbl}>Video {i + 1}</Text>
+          <Link src={url} style={styles.carMediaLink}>Watch on Instagram</Link>
+        </View>
+      ))}
+    </View>
+  );
+
+  // Split layout: media left, social right
   if (hasMedia && hasSocial) {
     return (
       <View style={styles.linkBoxContainer}>
-        {/* LEFT — car media */}
-        <View style={styles.linkBoxLeft}>
-          <Text style={styles.linkBoxTitle}>
-            {quotation.vehicleCompany} {quotation.vehicleModel} – Media
-          </Text>
-          {quotation.carDriveLink && (
-            <View style={styles.carMediaRow}>
-              <Text style={styles.carMediaLbl}>Photos &amp; Images</Text>
-              <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
-                View on Google Drive
-              </Link>
-            </View>
-          )}
-          {(quotation.carReelLinks || []).map((url, i) => (
-            <View key={i} style={styles.carMediaRow}>
-              <Text style={styles.carMediaLbl}>Installation Video {i + 1}</Text>
-              <Link src={url} style={styles.carMediaLink}>
-                Watch on Instagram
-              </Link>
-            </View>
-          ))}
-        </View>
-
-        {/* RIGHT — Connect With Us */}
-        <View style={styles.linkBoxRight}>
-          <Text style={styles.linkBoxTitle}>Connect With Us</Text>
-          {s.instagramUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="IG" color={C.igPink} />
-              <Link src={s.instagramUrl} style={styles.socialLink}>
-                Visit Instagram Page
-              </Link>
-            </View>
-          )}
-          {s.facebookUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="FB" color={C.fbBlue} />
-              <Link src={s.facebookUrl} style={styles.socialLink}>
-                Visit Facebook Page
-              </Link>
-            </View>
-          )}
-          {s.googleMapsUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="GM" color={C.mapsRed} />
-              <Link src={s.googleMapsUrl} style={styles.socialLink}>
-                Find Us on Google Maps
-              </Link>
-            </View>
-          )}
-        </View>
+        <MediaPanel />
+        <ConnectPanel />
       </View>
     );
   }
 
-  // Only car media (no social links) → full-width left panel
-  if (hasMedia && !hasSocial) {
+  // Only car media (no social) — full width
+  if (hasMedia) {
     return (
       <View style={[styles.linkBoxContainer, { flexDirection: "column" }]}>
-        <View style={{ padding: 10 }}>
-          <Text style={styles.linkBoxTitle}>
-            {quotation.vehicleCompany} {quotation.vehicleModel} – Media &amp; Reference
-          </Text>
-          {quotation.carDriveLink && (
-            <View style={styles.carMediaRow}>
-              <Text style={styles.carMediaLbl}>Photos &amp; Images</Text>
-              <Link src={quotation.carDriveLink} style={styles.carMediaLink}>
-                View on Google Drive
-              </Link>
-            </View>
-          )}
-          {(quotation.carReelLinks || []).map((url, i) => (
-            <View key={i} style={styles.carMediaRow}>
-              <Text style={styles.carMediaLbl}>Installation Video {i + 1}</Text>
-              <Link src={url} style={styles.carMediaLink}>
-                Watch on Instagram
-              </Link>
-            </View>
-          ))}
-        </View>
+        <MediaPanel />
       </View>
     );
   }
 
-  // Only social links (no car media) → full-width right panel
+  // Only social links (no car media) — full width
   return (
     <View style={[styles.linkBoxContainer, { flexDirection: "column" }]}>
-      <View style={{ padding: 10 }}>
-        <Text style={styles.linkBoxTitle}>Connect With Us</Text>
-        <View style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }}>
-          {s.instagramUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="IG" color={C.igPink} />
-              <Link src={s.instagramUrl} style={styles.socialLink}>
-                Visit Instagram Page
-              </Link>
-            </View>
-          )}
-          {s.facebookUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="FB" color={C.fbBlue} />
-              <Link src={s.facebookUrl} style={styles.socialLink}>
-                Visit Facebook Page
-              </Link>
-            </View>
-          )}
-          {s.googleMapsUrl && (
-            <View style={styles.socialRow}>
-              <PlatformBadge label="GM" color={C.mapsRed} />
-              <Link src={s.googleMapsUrl} style={styles.socialLink}>
-                Find Us on Google Maps
-              </Link>
-            </View>
-          )}
-        </View>
-      </View>
+      <ConnectPanel />
     </View>
   );
 }
@@ -451,7 +380,7 @@ function ListTable({ items = [] }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SECTIONS RENDERER
+//  SECTIONS RENDERER (Manage Quotations grid/list format)
 // ══════════════════════════════════════════════════════════════════════════════
 function SectionsRenderer({ sections, labourCost }) {
   return (
@@ -505,7 +434,7 @@ function SectionsRenderer({ sections, labourCost }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  LEGACY LINE ITEMS RENDERER
+//  LEGACY LINE ITEMS RENDERER (older quotation format)
 // ══════════════════════════════════════════════════════════════════════════════
 function LegacyRenderer({ lineItems, labourCost }) {
   return (
@@ -537,20 +466,20 @@ function LegacyRenderer({ lineItems, labourCost }) {
   );
 }
 
-// ─── Emission category label map ──────────────────────────────────────────────
+// Emission category readable label
 const EM_LABELS = {
   BS4:      "BS4",
-  BS6_4INJ: "BS6 – 4 Injector",
-  BS6_8INJ: "BS6 – 8 Injector",
+  BS6_4INJ: "BS6 - 4 Injector",
+  BS6_8INJ: "BS6 - 8 Injector",
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  EXPORTED PDF DOCUMENT
 //
-//  Page order (Feature 3 — link box placement change):
-//   1. Header (business info + quotation number/date)
+//  Page layout order:
+//   1. Header — business info (left, flex:1) | Quotation title+number (right, flexShrink:0)
 //   2. Customer + Vehicle info grid
-//   3. ★ CombinedLinkBox ← MOVED HERE (was at the bottom after price tables)
+//   3. Combined Link Box (car media left, Connect With Us right) — before tables
 //   4. Price tables (SectionsRenderer or LegacyRenderer)
 //   5. Disclaimer
 //   6. Notes (tableNote)
@@ -572,8 +501,10 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
       <Page size="A4" style={styles.page}>
 
         {/* ── 1. Header ── */}
+        {/* FIX: headerLeft has flex:1, headerRight has flexShrink:0 — prevents
+            "Quotation" heading from overflowing into / crowding the left column */}
         <View style={styles.headerRow}>
-          <View>
+          <View style={styles.headerLeft}>
             {s.businessLogoUrl && (
               <Image src={s.businessLogoUrl} style={styles.businessLogo} />
             )}
@@ -582,7 +513,8 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             {s.businessAddress && <Text style={styles.bizInfo}>{s.businessAddress}</Text>}
             {s.gstNumber       && <Text style={styles.bizInfo}>GSTIN: {s.gstNumber}</Text>}
           </View>
-          <View style={{ alignItems: "flex-end" }}>
+
+          <View style={styles.headerRight}>
             <Text style={styles.qLabel}>Quotation</Text>
             <Text style={styles.qNumber}>{quotation.quotationNumber}</Text>
             <Text style={styles.qDate}>Date: {fmtDate(quotation.createdAt)}</Text>
@@ -605,7 +537,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Phone</Text>
               <Text style={styles.infoValue}>
-                {quotation.customerPhone ? `+91 ${quotation.customerPhone}` : "—"}
+                {quotation.customerPhone ? `+91 ${quotation.customerPhone}` : "-"}
               </Text>
             </View>
           </View>
@@ -613,11 +545,11 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             <Text style={styles.infoBoxTitle}>Vehicle Details</Text>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Company</Text>
-              <Text style={styles.infoValue}>{quotation.vehicleCompany || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.vehicleCompany || "-"}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Model</Text>
-              <Text style={styles.infoValue}>{quotation.vehicleModel || "—"}</Text>
+              <Text style={styles.infoValue}>{quotation.vehicleModel || "-"}</Text>
             </View>
             {quotation.vehicleYear && (
               <View style={styles.infoRow}>
@@ -628,11 +560,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </View>
         </View>
 
-        {/* ── 3. Combined Link Box (Feature 3: placement BEFORE price tables) ──
-            Contains car media links (left) and Connect With Us (right).
-            Redesigned as a split layout with platform badges (Feature 2).
-            Only renders if at least one link type is present.
-        ── */}
+        {/* ── 3. Combined Link Box (before price tables) ── */}
         <CombinedLinkBox quotation={quotation} businessSettings={s} />
 
         {/* ── 4. Price tables ── */}
@@ -648,7 +576,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </Text>
         </View>
 
-        {/* ── 6. Notes (tableNote from Manage Quotations) ── */}
+        {/* ── 6. Notes ── */}
         {quotation.tableNote ? (
           <View style={styles.notesBox}>
             <Text style={styles.notesTitle}>Notes</Text>
@@ -656,7 +584,7 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
           </View>
         ) : null}
 
-        {/* ── 7. Footer (fixed — appears on every page) ── */}
+        {/* ── 7. Footer (fixed on every page) ── */}
         <View style={styles.footer} fixed>
           <Text style={styles.footerLeft}>
             {s.businessName || "Shree Ganesh Automobile"}
