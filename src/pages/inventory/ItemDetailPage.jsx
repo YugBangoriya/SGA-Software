@@ -1,4 +1,4 @@
-// SGA — Last updated: Added untracked item display (totalSold counter, no stock bar), stock tracking toggle with confirmation dialog, Local Item purchase price editor
+// SGA — Last updated: Added untracked item display, stock tracking toggle, Local Item purchase price editor, shortcut/alias inline editor
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
@@ -32,7 +32,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, RefreshCw, Package, Calendar, Tag, IndianRupee,
   TruckIcon, AlertTriangle, Edit2, Check, X, History, Info, Trash2,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, Zap,
 } from 'lucide-react';
 
 import useInventoryStore from '../../store/inventoryStore';
@@ -145,6 +145,95 @@ function EntryTypeBadge({ type }) {
     }}>
       {isInitial ? 'INITIAL' : 'REPLENISH'}
     </span>
+  );
+}
+
+// ─── Inline Shortcut / Alias Editor ───────────────────────────────────────────
+
+function ShortcutEditor({ itemId, currentShortcut, user, onSaved }) {
+  const { updateItem } = useInventoryStore();
+  const [editing, setEditing] = useState(false);
+  const [value,   setValue]   = useState(currentShortcut || '');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
+
+  const handleSave = async () => {
+    setLoading(true); setError('');
+    try {
+      await updateItem(itemId, { shortcut: value.trim() }, user);
+      setEditing(false);
+      onSaved?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{
+          fontSize: 13, fontFamily: TYPOGRAPHY.mono, letterSpacing: 0.5,
+          color: currentShortcut ? COLORS.textPrimary : COLORS.textMuted,
+          background: currentShortcut ? COLORS.tableHeader : 'transparent',
+          padding: currentShortcut ? '2px 8px' : 0,
+          borderRadius: RADII.sm,
+        }}>
+          {currentShortcut || 'Not set'}
+        </span>
+        <button
+          onClick={() => { setValue(currentShortcut || ''); setEditing(true); }}
+          style={{
+            background: 'none', border: `1px solid ${COLORS.tableHeader}`,
+            borderRadius: RADII.sm, padding: '3px 7px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 4, color: COLORS.textSecondary,
+          }}
+        >
+          <Edit2 size={11} />
+          <span style={{ fontSize: 11, fontFamily: TYPOGRAPHY.sans }}>Edit</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <input
+        type="text" value={value} autoFocus
+        onChange={(e) => { setValue(e.target.value); setError(''); }}
+        placeholder="e.g. ms, cng-kit"
+        style={{
+          width: 120, padding: '5px 8px',
+          border: `1.5px solid ${error ? COLORS.statusRed : COLORS.primary}`,
+          borderRadius: RADII.sm, fontSize: 13, fontFamily: TYPOGRAPHY.mono, outline: 'none',
+          letterSpacing: 0.5,
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter')  handleSave();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+      />
+      <button
+        onClick={handleSave} disabled={loading}
+        style={{
+          background: COLORS.statusGreen, color: '#FFF', border: 'none',
+          borderRadius: RADII.sm, padding: '5px 8px',
+          cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center',
+        }}
+      >
+        {loading
+          ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'sgaSpin 0.7s linear infinite' }} />
+          : <Check size={13} />}
+      </button>
+      <button
+        onClick={() => { setEditing(false); setError(''); }}
+        style={{ background: 'none', border: `1px solid ${COLORS.tableHeader}`, borderRadius: RADII.sm, padding: '5px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: COLORS.textSecondary }}
+      >
+        <X size={13} />
+      </button>
+      {error && <span style={{ fontSize: 11, color: COLORS.statusRed, fontFamily: TYPOGRAPHY.sans }}>{error}</span>}
+    </div>
   );
 }
 
@@ -812,6 +901,22 @@ export default function ItemDetailPage() {
               <span style={{ fontSize: 14, color: item.vendorName ? COLORS.textPrimary : COLORS.textMuted, fontFamily: TYPOGRAPHY.sans }}>
                 {item.vendorName || '—'}
               </span>
+            </DetailRow>
+
+            {/* NEW — Shortcut / Alias field */}
+            <DetailRow label="Search Shortcut" icon={<Zap size={14} />}>
+              {isOwnerOrAdmin ? (
+                <ShortcutEditor
+                  itemId={item.id}
+                  currentShortcut={item.shortcut}
+                  user={user}
+                  onSaved={() => fetchItem(item.id)}
+                />
+              ) : (
+                <span style={{ fontSize: 13, fontFamily: TYPOGRAPHY.mono, color: item.shortcut ? COLORS.textPrimary : COLORS.textMuted, background: item.shortcut ? COLORS.tableHeader : 'transparent', padding: item.shortcut ? '2px 8px' : 0, borderRadius: RADII.sm, letterSpacing: 0.5 }}>
+                  {item.shortcut || '—'}
+                </span>
+              )}
             </DetailRow>
 
             {item.notes && (

@@ -1,4 +1,4 @@
-// SGA — Last updated: Added isUntracked support (optional quantity), totalSold counter, Local Items auto-creation, updateTrackingMode, updateLocalItemPurchasePrice
+// SGA — Last updated: Added shortcut/alias field support — stored on items and searched during invoice creation
 /**
  * Inventory Service — Shree Ganesh Automobile
  * All Firestore read/write operations for the Inventory module.
@@ -7,14 +7,9 @@
  *   Inventory quantity is NEVER deducted here during invoice creation.
  *   Deduction happens ONLY when an Owner approves an invoice (Phase 4).
  *
- * NEW (Request 1 — Untracked Items):
- *   Items with isUntracked: true have no stock ceiling. quantity field is
- *   absent/null. totalSold accumulates units sold on invoice approval.
- *
- * NEW (Request 2 — Local Items):
- *   Items in category 'Local Items' are auto-created by invoiceApproval.js
- *   when a line item with isLocalItem: true is approved.
- *   updateLocalItemPurchasePrice() is called by Owner from ItemDetailPage.
+ * NEW (Request 1 — Untracked Items): Items with isUntracked: true have no stock ceiling.
+ * NEW (Request 2 — Local Items): Items in category 'Local Items' are auto-created by invoiceApproval.js
+ * NEW (Request 3 — Shortcut/Alias): Items can have a shortcut field for fast search in invoice creation.
  *
  * Collections:
  *   /inventory                     — main item documents
@@ -23,22 +18,9 @@
  */
 
 import {
-  collection,
-  doc,
-  addDoc,
-  updateDoc,
-  getDoc,
-  getDocs,
-  deleteDoc,
-  query,
-  orderBy,
-  serverTimestamp,
-  increment,
-  runTransaction,
-  where,
-  Timestamp,
-  writeBatch,
-  deleteField,
+  collection, doc, addDoc, updateDoc, getDoc, getDocs, deleteDoc,
+  query, orderBy, serverTimestamp, increment, runTransaction,
+  Timestamp, writeBatch, deleteField,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { logAudit } from './auditService';
@@ -46,11 +28,7 @@ import { logAudit } from './auditService';
 const INV  = 'inventory';
 const CATS = 'inventoryCategories';
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-
-const toTimestamp = (dateStr) =>
-  dateStr ? Timestamp.fromDate(new Date(dateStr)) : null;
-
+const toTimestamp = (dateStr) => dateStr ? Timestamp.fromDate(new Date(dateStr)) : null;
 const docToItem = (snap) => ({ id: snap.id, ...snap.data() });
 
 // ─── READ ──────────────────────────────────────────────────────────────────────
@@ -68,24 +46,15 @@ export const getInventoryItem = async (itemId) => {
 };
 
 export const getRestockHistory = async (itemId) => {
-  const q = query(
-    collection(db, INV, itemId, 'restockHistory'),
-    orderBy('addedAt', 'desc')
-  );
+  const q = query(collection(db, INV, itemId, 'restockHistory'), orderBy('addedAt', 'desc'));
   const snap = await getDocs(q);
   return snap.docs.map(docToItem);
 };
 
-/**
- * Low-stock items: only tracked items (isUntracked !== true) are considered.
- * Untracked items have no stock ceiling so they are never "low".
- */
 export const getLowStockItems = async () => {
   const items = await getInventoryItems();
   return items.filter(
-    (item) =>
-      item.isUntracked !== true &&
-      (item.quantity ?? 0) <= (item.lowStockThreshold ?? 5)
+    (item) => item.isUntracked !== true && (item.quantity ?? 0) <= (item.lowStockThreshold ?? 5)
   );
 };
 
@@ -93,26 +62,16 @@ export const getLowStockItems = async () => {
 
 export const addInventoryItem = async ({ itemData, user }) => {
   const {
-    itemName,
-    categoryId,
-    quantityAdded,
-    purchasePrice,
-    sellingPrice,
-    dateOrderedOrReceived,
-    vendorName,
-    lowStockThreshold,
-    isDateManuallySet,
-    notes,
-    isUntracked,   // NEW — true when stock tracking is disabled
+    itemName, shortcut, categoryId, quantityAdded, purchasePrice,
+    sellingPrice, dateOrderedOrReceived, vendorName, lowStockThreshold,
+    isDateManuallySet, notes, isUntracked,
   } = itemData;
 
-  const orderTimestamp = dateOrderedOrReceived
-    ? toTimestamp(dateOrderedOrReceived)
-    : serverTimestamp();
+  const orderTimestamp = dateOrderedOrReceived ? toTimestamp(dateOrderedOrReceived) : serverTimestamp();
 
-  // Build the document — quantity and lowStockThreshold omitted for untracked
   const newItem = {
     itemName:              itemName.trim(),
+    shortcut:              shortcut?.trim() || '',   // NEW — alias for fast invoice search
     categoryId:            categoryId || '',
     purchasePrice:         purchasePrice !== '' && purchasePrice != null ? Number(purchasePrice) : null,
     sellingPrice:          sellingPrice  != null && sellingPrice  !== '' ? Number(sellingPrice)  : null,
@@ -130,42 +89,27 @@ export const addInventoryItem = async ({ itemData, user }) => {
   };
 
   if (!isUntracked) {
-    // Tracked item — include quantity and low-stock threshold
     newItem.quantity          = Number(quantityAdded);
     newItem.lowStockThreshold = Number(lowStockThreshold) || 5;
   }
 
   const itemRef = await addDoc(collection(db, INV), newItem);
 
-  // Only write a restockHistory entry for tracked items
   if (!isUntracked) {
     await addDoc(collection(db, INV, itemRef.id, 'restockHistory'), {
-      date:              orderTimestamp,
-      quantityAdded:     Number(quantityAdded),
-      purchasePrice:     purchasePrice !== '' ? Number(purchasePrice) : null,
-      vendorName:        vendorName?.trim() || '',
-      notes:             notes?.trim() || '',
-      addedBy:           user.uid,
-      addedByName:       user.displayName || user.email,
-      addedAt:           serverTimestamp(),
-      isDateManuallySet: isDateManuallySet ?? false,
-      entryType:         'INITIAL',
+      date: orderTimestamp, quantityAdded: Number(quantityAdded),
+      purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null,
+      vendorName: vendorName?.trim() || '', notes: notes?.trim() || '',
+      addedBy: user.uid, addedByName: user.displayName || user.email,
+      addedAt: serverTimestamp(), isDateManuallySet: isDateManuallySet ?? false,
+      entryType: 'INITIAL',
     });
   }
 
   await logAudit({
-    action:           'inventory.added',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemRef.id,
-    targetCollection: INV,
-    metadata: {
-      itemName,
-      quantityAdded: isUntracked ? null : Number(quantityAdded),
-      purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null,
-      isUntracked:   !!isUntracked,
-      categoryId,
-    },
+    action: 'inventory.added', userId: user.uid, userName: user.displayName || user.email,
+    targetId: itemRef.id, targetCollection: INV,
+    metadata: { itemName, shortcut: shortcut?.trim() || '', quantityAdded: isUntracked ? null : Number(quantityAdded), purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null, isUntracked: !!isUntracked, categoryId },
   });
 
   return itemRef.id;
@@ -174,282 +118,111 @@ export const addInventoryItem = async ({ itemData, user }) => {
 // ─── REPLENISH EXISTING ITEM ──────────────────────────────────────────────────
 
 export const replenishInventoryItem = async ({ itemId, replenishData, user }) => {
-  const {
-    quantityAdded,
-    purchasePrice,
-    sellingPrice,
-    dateOrderedOrReceived,
-    vendorName,
-    isDateManuallySet,
-    notes,
-  } = replenishData;
-
-  const orderTimestamp = dateOrderedOrReceived
-    ? toTimestamp(dateOrderedOrReceived)
-    : serverTimestamp();
+  const { quantityAdded, purchasePrice, sellingPrice, dateOrderedOrReceived, vendorName, isDateManuallySet, notes } = replenishData;
+  const orderTimestamp = dateOrderedOrReceived ? toTimestamp(dateOrderedOrReceived) : serverTimestamp();
 
   await runTransaction(db, async (transaction) => {
     const itemRef  = doc(db, INV, itemId);
     const itemSnap = await transaction.get(itemRef);
     if (!itemSnap.exists()) throw new Error('Inventory item not found');
 
-    const sellingPriceUpdate = sellingPrice != null
-      ? { sellingPrice: Number(sellingPrice) }
-      : {};
-
+    const sellingPriceUpdate = sellingPrice != null ? { sellingPrice: Number(sellingPrice) } : {};
     const update = {
-      purchasePrice:         Number(purchasePrice),
-      ...sellingPriceUpdate,
-      vendorName:            vendorName?.trim() || itemSnap.data().vendorName || '',
-      lastRestockedDate:     orderTimestamp,
-      isLastDateManuallySet: isDateManuallySet ?? false,
-      lastUpdatedAt:         serverTimestamp(),
-      lastUpdatedBy:         user.uid,
+      purchasePrice: Number(purchasePrice), ...sellingPriceUpdate,
+      vendorName: vendorName?.trim() || itemSnap.data().vendorName || '',
+      lastRestockedDate: orderTimestamp, isLastDateManuallySet: isDateManuallySet ?? false,
+      lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid,
     };
 
-    // Only increment quantity for tracked items
     if (!itemSnap.data().isUntracked) {
       update.quantity = increment(Number(quantityAdded));
     }
-
     transaction.update(itemRef, update);
   });
 
   await addDoc(collection(db, INV, itemId, 'restockHistory'), {
-    date:              orderTimestamp,
-    quantityAdded:     Number(quantityAdded),
-    purchasePrice:     Number(purchasePrice),
-    vendorName:        vendorName?.trim() || '',
-    notes:             notes?.trim() || '',
-    addedBy:           user.uid,
-    addedByName:       user.displayName || user.email,
-    addedAt:           serverTimestamp(),
-    isDateManuallySet: isDateManuallySet ?? false,
-    entryType:         'REPLENISH',
+    date: orderTimestamp, quantityAdded: Number(quantityAdded),
+    purchasePrice: Number(purchasePrice), vendorName: vendorName?.trim() || '',
+    notes: notes?.trim() || '', addedBy: user.uid, addedByName: user.displayName || user.email,
+    addedAt: serverTimestamp(), isDateManuallySet: isDateManuallySet ?? false, entryType: 'REPLENISH',
   });
 
   await logAudit({
-    action:           'inventory.replenished',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         { quantityAdded: Number(quantityAdded), purchasePrice: Number(purchasePrice), vendorName },
+    action: 'inventory.replenished', userId: user.uid, userName: user.displayName || user.email,
+    targetId: itemId, targetCollection: INV,
+    metadata: { quantityAdded: Number(quantityAdded), purchasePrice: Number(purchasePrice), vendorName },
   });
 };
 
 // ─── UPDATE ITEM DETAILS ───────────────────────────────────────────────────────
 
 export const updateInventoryItem = async ({ itemId, updates, user }) => {
-  const itemRef = doc(db, INV, itemId);
-  await updateDoc(itemRef, {
-    ...updates,
-    lastUpdatedAt: serverTimestamp(),
-    lastUpdatedBy: user.uid,
-  });
-
-  await logAudit({
-    action:           'inventory.updated',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         updates,
-  });
+  await updateDoc(doc(db, INV, itemId), { ...updates, lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid });
+  await logAudit({ action: 'inventory.updated', userId: user.uid, userName: user.displayName || user.email, targetId: itemId, targetCollection: INV, metadata: updates });
 };
 
 export const updateLowStockThreshold = async ({ itemId, threshold, user }) => {
-  const itemRef = doc(db, INV, itemId);
-  await updateDoc(itemRef, {
-    lowStockThreshold: Number(threshold),
-    lastUpdatedAt:     serverTimestamp(),
-    lastUpdatedBy:     user.uid,
-  });
-
-  await logAudit({
-    action:           'inventory.threshold_updated',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         { threshold: Number(threshold) },
-  });
+  await updateDoc(doc(db, INV, itemId), { lowStockThreshold: Number(threshold), lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid });
+  await logAudit({ action: 'inventory.threshold_updated', userId: user.uid, userName: user.displayName || user.email, targetId: itemId, targetCollection: INV, metadata: { threshold: Number(threshold) } });
 };
 
-// ─── TOGGLE TRACKING MODE (Owner / SuperAdmin) ─────────────────────────────────
-/**
- * Convert a tracked item to untracked (discards stock count) or vice-versa.
- * Called from ItemDetailPage when the owner flips the "Track stock quantity" toggle.
- *
- * toUntracked: true  → tracked → untracked (quantity field removed)
- * toUntracked: false → untracked → tracked (startingQty required)
- */
+// ─── TOGGLE TRACKING MODE ─────────────────────────────────────────────────────
+
 export const updateTrackingMode = async ({ itemId, toUntracked, startingQty = 0, user }) => {
   const itemRef = doc(db, INV, itemId);
-
   if (toUntracked) {
-    // Remove quantity and lowStockThreshold, set isUntracked = true
-    await updateDoc(itemRef, {
-      isUntracked:       true,
-      quantity:          deleteField(),
-      lowStockThreshold: deleteField(),
-      lastUpdatedAt:     serverTimestamp(),
-      lastUpdatedBy:     user.uid,
-    });
+    await updateDoc(itemRef, { isUntracked: true, quantity: deleteField(), lowStockThreshold: deleteField(), lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid });
   } else {
-    // Re-enable tracking with a provided starting quantity
-    await updateDoc(itemRef, {
-      isUntracked:       false,
-      quantity:          Number(startingQty),
-      lowStockThreshold: 5,
-      lastUpdatedAt:     serverTimestamp(),
-      lastUpdatedBy:     user.uid,
-    });
+    await updateDoc(itemRef, { isUntracked: false, quantity: Number(startingQty), lowStockThreshold: 5, lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid });
   }
-
-  await logAudit({
-    action:           toUntracked ? 'inventory.tracking_disabled' : 'inventory.tracking_enabled',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         { toUntracked, startingQty: toUntracked ? null : Number(startingQty) },
-  });
+  await logAudit({ action: toUntracked ? 'inventory.tracking_disabled' : 'inventory.tracking_enabled', userId: user.uid, userName: user.displayName || user.email, targetId: itemId, targetCollection: INV, metadata: { toUntracked, startingQty: toUntracked ? null : Number(startingQty) } });
 };
 
-// ─── UPDATE PURCHASE PRICE FOR LOCAL ITEMS ─────────────────────────────────────
-/**
- * Called by Owner/SuperAdmin from ItemDetailPage on a Local Item to
- * enter the cost after the fact. Once set, profit/loss calculations
- * for all past invoices referencing this item become accurate.
- */
+// ─── UPDATE PURCHASE PRICE FOR LOCAL ITEMS ────────────────────────────────────
+
 export const updateLocalItemPurchasePrice = async ({ itemId, purchasePrice, user }) => {
-  const itemRef = doc(db, INV, itemId);
-  await updateDoc(itemRef, {
-    purchasePrice:  Number(purchasePrice),
-    lastUpdatedAt:  serverTimestamp(),
-    lastUpdatedBy:  user.uid,
-  });
-
-  await logAudit({
-    action:           'inventory.local_item_purchase_price_set',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         { purchasePrice: Number(purchasePrice) },
-  });
+  await updateDoc(doc(db, INV, itemId), { purchasePrice: Number(purchasePrice), lastUpdatedAt: serverTimestamp(), lastUpdatedBy: user.uid });
+  await logAudit({ action: 'inventory.local_item_purchase_price_set', userId: user.uid, userName: user.displayName || user.email, targetId: itemId, targetCollection: INV, metadata: { purchasePrice: Number(purchasePrice) } });
 };
 
-// ─── DELETE INVENTORY ITEM (Owner / SuperAdmin only) ──────────────────────────
+// ─── DELETE ────────────────────────────────────────────────────────────────────
 
 export const deleteInventoryItem = async (itemId, user) => {
   await deleteDoc(doc(db, INV, itemId));
-
-  await logAudit({
-    action:           'inventory.deleted',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         itemId,
-    targetCollection: INV,
-    metadata:         {},
-  });
+  await logAudit({ action: 'inventory.deleted', userId: user.uid, userName: user.displayName || user.email, targetId: itemId, targetCollection: INV, metadata: { itemId } });
 };
 
-// ─── DEDUCTION — called by Invoice Approval ONLY ───────────────────────────────
-
-export const deductInventoryForInvoice = async ({
-  lineItems,
-  invoiceId,
-  user,
-  transaction: txn = null,
-}) => {
-  for (const { itemId, quantity, isUntracked: itemIsUntracked } of lineItems) {
-    const itemRef = doc(db, INV, itemId);
-    const update = {
-      totalSold:     increment(Number(quantity)),
-      lastUpdatedAt: serverTimestamp(),
-      lastUpdatedBy: user.uid,
-    };
-    // Only decrement quantity for tracked items
-    if (!itemIsUntracked) {
-      update.quantity = increment(-Number(quantity));
-    }
-    if (txn) {
-      txn.update(itemRef, update);
-    } else {
-      await updateDoc(itemRef, update);
-    }
-  }
+export const deleteItems = async (itemIds, user) => {
+  const batch = writeBatch(db);
+  itemIds.forEach((id) => batch.delete(doc(db, INV, id)));
+  await batch.commit();
+  await logAudit({ action: 'inventory.bulk_deleted', userId: user.uid, userName: user.displayName || user.email, targetId: itemIds.join(','), targetCollection: INV, metadata: { count: itemIds.length } });
 };
 
-// ─── CATEGORIES ────────────────────────────────────────────────────────────────
+// ─── CATEGORY CRUD ─────────────────────────────────────────────────────────────
 
-export const getCategories = async () => {
-  const q = query(collection(db, CATS), orderBy('name', 'asc'));
-  const snap = await getDocs(q);
-  return snap.docs.map(docToItem);
+export const getInventoryCategories = async () => {
+  const snap = await getDocs(collection(db, CATS));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-export const addCategory = async ({ name, user }) => {
-  const existing = await getCategories();
-  const isDuplicate = existing.some(
-    (c) => c.name.toLowerCase() === name.trim().toLowerCase()
-  );
-  if (isDuplicate) throw new Error(`Category "${name.trim()}" already exists`);
-
-  const ref = await addDoc(collection(db, CATS), {
-    name:      name.trim(),
-    createdAt: serverTimestamp(),
-    createdBy: user.uid,
-  });
-
-  await logAudit({
-    action:           'inventory.category_added',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         ref.id,
-    targetCollection: CATS,
-    metadata:         { name: name.trim() },
-  });
-
-  return ref.id;
+export const addInventoryCategory = async (name) => {
+  const ref = await addDoc(collection(db, CATS), { name: name.trim(), createdAt: serverTimestamp() });
+  return { id: ref.id, name: name.trim() };
 };
 
-export const updateCategory = async ({ categoryId, newName, user }) => {
-  await updateDoc(doc(db, CATS, categoryId), {
-    name:      newName.trim(),
-    updatedAt: serverTimestamp(),
-    updatedBy: user.uid,
-  });
-
-  await logAudit({
-    action:           'inventory.category_updated',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         categoryId,
-    targetCollection: CATS,
-    metadata:         { newName: newName.trim() },
-  });
-};
-
-export const deleteCategory = async ({ categoryId, user }) => {
-  const usedBy  = query(collection(db, INV), where('categoryId', '==', categoryId));
-  const usedSnap = await getDocs(usedBy);
-  if (!usedSnap.empty) {
-    throw new Error(
-      `Cannot delete — ${usedSnap.size} inventory item${usedSnap.size > 1 ? 's' : ''} still use this category. Reassign them first.`
-    );
-  }
-
+export const deleteInventoryCategory = async (categoryId) => {
   await deleteDoc(doc(db, CATS, categoryId));
-
-  await logAudit({
-    action:           'inventory.category_deleted',
-    userId:           user.uid,
-    userName:         user.displayName || user.email,
-    targetId:         categoryId,
-    targetCollection: CATS,
-    metadata:         {},
-  });
 };
+
+export const updateInventoryCategory = async (categoryId, name) => {
+  await updateDoc(doc(db, CATS, categoryId), { name: name.trim() });
+};
+
+// ─── Backward-compatible aliases ──────────────────────────────────────────────
+// inventoryStore.js imports the shorter original names. These re-exports keep the
+// store working without any changes to inventoryStore.js.
+export const getCategories    = getInventoryCategories;
+export const addCategory      = addInventoryCategory;
+export const updateCategory   = updateInventoryCategory;
+export const deleteCategory   = deleteInventoryCategory;

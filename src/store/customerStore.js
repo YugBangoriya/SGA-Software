@@ -1,9 +1,4 @@
-// SGA — Last updated: Fixed loadSettings() — dropdown values configured in Settings → Dropdown
-// Values (DropdownManager) are stored under settings.dropdowns.{category} in /settings/main,
-// but loadSettings was reading non-existent top-level settings.{category} fields, so Customer
-// Creation always fell back to hardcoded defaults regardless of Owner-configured options.
-// Now correctly reads settings.dropdowns.cngKitBrands/addOns/advancers/technicianNames/
-// vehicleEmissionCategories (with key remapping for technicians/emissionCategories).
+// SGA — Last updated: Added new CNG Kit dropdown categories (cngKits, ckpAdvancers, extraItems, cylinders) to loadSettings for Customer CNG Kit step
 /**
  * customerStore.js
  * Zustand store for the Customer Records module.
@@ -98,6 +93,11 @@ const useCustomerStore = create((set, get) => ({
               addOns:             dd.addOns                 || DEFAULT_DROPDOWN_OPTIONS.addOns,
               technicians:        dd.technicianNames        || DEFAULT_DROPDOWN_OPTIONS.technicians,
               emissionCategories: dd.vehicleEmissionCategories || DEFAULT_DROPDOWN_OPTIONS.emissionCategories,
+              // NEW — CNG Kit installation fields (configured in Settings → Dropdown Values)
+              cngKits:       dd.cngKits       || [],
+              ckpAdvancers:  dd.ckpAdvancers  || [],
+              extraItems:    dd.extraItems    || [],
+              cylinders:     dd.cylinders     || [],
             }
           : DEFAULT_DROPDOWN_OPTIONS,
         customFields:      customFields || [],

@@ -1,8 +1,10 @@
+// SGA — Last updated: Bug fix — VehicleSection now renders the full vehicles[] array for multi-vehicle customers; falls back to flat legacy fields for older records. Backward compatible with all existing data.
 /**
  * CustomerDetail.jsx
  * Route: /customers/:id
  * Full customer profile page with:
  *   - Personal + vehicle + CNG info in organized card sections
+ *   - Multi-vehicle tab support (vehicles[] array from new CustomerForm)
  *   - Re-test date history table
  *   - Owner can add/edit re-test dates
  *   - Custom fields section (if any)
@@ -81,6 +83,7 @@ export default function CustomerDetail() {
 
   const [showRetestModal, setShowRetestModal] = useState(false);
   const [editingRetest, setEditingRetest] = useState(null); // index of entry being edited
+  const [activeVehicleTab, setActiveVehicleTab] = useState(0); // which vehicle is shown in multi-vehicle view
 
   useEffect(() => {
     loadCustomer(id);
@@ -167,60 +170,14 @@ export default function CustomerDetail() {
           </InfoGrid>
         </InfoCard>
 
-        {/* ── Vehicle Info ──────────────────────────────────────────────── */}
-        <InfoCard title="Vehicle Details" c={c}>
-          <InfoGrid>
-            <InfoRow label="Registration No." value={customer.vehicleNo} mono c={c} highlight />
-            <InfoRow label="Make / Company" value={customer.vehicleMake} c={c} />
-            <InfoRow label="Model" value={customer.vehicleModel} c={c} />
-            <InfoRow label="Year" value={customer.vehicleYear} c={c} />
-            <InfoRow
-              label="Emission Category"
-              value={customer.emissionCategory}
-              c={c}
-              badge={{ variant: 'info', text: customer.emissionCategory }}
-            />
-          </InfoGrid>
-        </InfoCard>
-
-        {/* ── CNG Kit Info ──────────────────────────────────────────────── */}
-        <InfoCard title="CNG Kit Details" c={c}>
-          <InfoGrid>
-            <InfoRow label="Kit Brand" value={customer.cngKitBrand} c={c} />
-            <InfoRow label="Kit Model" value={customer.cngKitModel} c={c} />
-            <InfoRow label="Tank Capacity" value={customer.tankCapacity ? `${customer.tankCapacity} Litres` : null} c={c} />
-          </InfoGrid>
-          {customer.advancers?.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <span style={{ fontSize: 12, color: c.textSecondary, display: 'block', marginBottom: 6 }}>Advancers</span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {customer.advancers.map((a) => <Badge key={a} variant="info">{a}</Badge>)}
-              </div>
-            </div>
-          )}
-          {customer.addOns?.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <span style={{ fontSize: 12, color: c.textSecondary, display: 'block', marginBottom: 6 }}>Add-Ons</span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {customer.addOns.map((a) => <Badge key={a} variant="warning">{a}</Badge>)}
-              </div>
-            </div>
-          )}
-        </InfoCard>
-
-        {/* ── Installation Info ─────────────────────────────────────────── */}
-        <InfoCard title="Installation Details" c={c}>
-          <InfoGrid>
-            <InfoRow label="Installation Date" value={fmt(customer.installationDate)} c={c} />
-            <InfoRow label="Technician" value={customer.technicianName} c={c} />
-          </InfoGrid>
-          {customer.notes && (
-            <div style={{ marginTop: 12, padding: '10px 12px', background: c.elevatedBg, borderRadius: RADIUS.md }}>
-              <span style={{ fontSize: 11, color: c.textSecondary, display: 'block', marginBottom: 4 }}>Notes</span>
-              <p style={{ margin: 0, fontSize: 13, color: c.textPrimary, lineHeight: 1.5 }}>{customer.notes}</p>
-            </div>
-          )}
-        </InfoCard>
+        {/* ── Vehicle(s) / CNG Kit / Installation ──────────────────────── */}
+        {/* VehicleSection handles both old (flat fields) and new (vehicles[]) formats */}
+        <VehicleSection
+          customer={customer}
+          c={c}
+          activeVehicleTab={activeVehicleTab}
+          setActiveVehicleTab={setActiveVehicleTab}
+        />
 
         {/* ── Custom Fields ─────────────────────────────────────────────── */}
         {customFields.length > 0 && Object.keys(customer.customFields || {}).length > 0 && (
@@ -420,6 +377,189 @@ function RetestModal({ open, onClose, editingEntry, onSave, c }) {
         />
       </div>
     </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VEHICLE SECTION — handles both old (flat fields) and new (vehicles[]) formats
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * VehicleSection
+ *
+ * Renders vehicle details, CNG kit info, and installation info.
+ *
+ * Data routing:
+ *   - If customer.vehicles[] exists and has ≥ 1 entry → use new format
+ *     (vehicleCompany from vehicles[i], cngKit, ckpAdvancer, extras, cylinder, etc.)
+ *   - Otherwise → fall back to legacy flat fields
+ *     (vehicleMake, vehicleModel, cngKitBrand, advancers[], addOns[], etc.)
+ *     so that all customers created before this redesign continue displaying correctly.
+ *
+ * Multiple vehicles: when vehicles.length > 1, a tab row is shown at the top
+ * of the section so the user can switch between vehicles.
+ */
+function VehicleSection({ customer, c, activeVehicleTab, setActiveVehicleTab }) {
+  const hasVehiclesArray =
+    Array.isArray(customer.vehicles) && customer.vehicles.length > 0;
+
+  // ── NEW FORMAT (vehicles[] array) ─────────────────────────────────────────
+  if (hasVehiclesArray) {
+    const vehicles   = customer.vehicles;
+    const safeIdx    = Math.min(activeVehicleTab, vehicles.length - 1);
+    const v          = vehicles[safeIdx];
+    const company    = v.isManualVehicle ? (v.notInListCompany || v.vehicleCompany || '') : (v.vehicleCompany || '');
+    const model      = v.isManualVehicle ? (v.notInListModel   || v.vehicleModel   || '') : (v.vehicleModel   || '');
+
+    return (
+      <>
+        {/* Multi-vehicle tab selector */}
+        {vehicles.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+            {vehicles.map((veh, idx) => {
+              const regNo = veh.vehicleNo || veh.notInListCompany || `Vehicle ${idx + 1}`;
+              const isActive = idx === safeIdx;
+              return (
+                <button
+                  key={veh._vid || idx}
+                  onClick={() => setActiveVehicleTab(idx)}
+                  style={{
+                    padding: '6px 14px', borderRadius: RADIUS.full, fontSize: 12, fontWeight: 600,
+                    border: `1.5px solid ${isActive ? c.primary : c.border}`,
+                    background: isActive ? c.primary : c.cardBg,
+                    color: isActive ? '#FFF' : c.textSecondary,
+                    cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  🚗 {regNo}{veh.vehicleModel ? ` — ${veh.vehicleModel}` : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Vehicle Details */}
+        <InfoCard
+          title={vehicles.length > 1 ? `Vehicle ${safeIdx + 1} — Details` : 'Vehicle Details'}
+          c={c}
+        >
+          {v.isManualVehicle && (
+            <div style={{ marginBottom: 10, padding: '6px 10px', background: c.statusAmberBg, borderRadius: RADIUS.md, fontSize: 11, color: c.statusAmberText }}>
+              ⚠ Not in Car Repository — manually entered
+            </div>
+          )}
+          <InfoGrid>
+            <InfoRow label="Registration No." value={v.vehicleNo}        mono c={c} highlight />
+            <InfoRow label="Make / Company"   value={company}             c={c} />
+            <InfoRow label="Model"            value={model}               c={c} />
+            <InfoRow label="Year"             value={v.vehicleYear}       c={c} />
+            <InfoRow
+              label="Emission Category"
+              value={v.emissionCategory}
+              c={c}
+              badge={v.emissionCategory ? { variant: 'info', text: v.emissionCategory } : undefined}
+            />
+          </InfoGrid>
+        </InfoCard>
+
+        {/* CNG Kit — new 4-field format */}
+        <InfoCard
+          title={vehicles.length > 1 ? `Vehicle ${safeIdx + 1} — CNG Kit` : 'CNG Kit Details'}
+          c={c}
+        >
+          <InfoGrid>
+            <InfoRow label="CNG Kit"      value={v.cngKit      || null} c={c} />
+            <InfoRow label="CKP Advancer" value={v.ckpAdvancer || null} c={c} />
+            <InfoRow label="Extras"       value={v.extras       || null} c={c} />
+            <InfoRow label="Cylinder"     value={v.cylinder     || null} c={c} />
+          </InfoGrid>
+          {/* If none of the new fields are set, show legacy cngKitBrand as fallback */}
+          {!v.cngKit && !v.ckpAdvancer && !v.extras && !v.cylinder && customer.cngKitBrand && (
+            <InfoGrid>
+              <InfoRow label="Kit Brand (legacy)" value={customer.cngKitBrand} c={c} />
+              <InfoRow label="Kit Model (legacy)" value={customer.cngKitModel} c={c} />
+              <InfoRow label="Tank Capacity"      value={customer.tankCapacity ? `${customer.tankCapacity} L` : null} c={c} />
+            </InfoGrid>
+          )}
+        </InfoCard>
+
+        {/* Installation — per vehicle */}
+        <InfoCard
+          title={vehicles.length > 1 ? `Vehicle ${safeIdx + 1} — Installation` : 'Installation Details'}
+          c={c}
+        >
+          <InfoGrid>
+            <InfoRow label="Installation Date" value={fmt(v.installationDate)} c={c} />
+            <InfoRow label="Technician"         value={v.technicianName}        c={c} />
+          </InfoGrid>
+          {v.notes && (
+            <div style={{ marginTop: 12, padding: '10px 12px', background: c.elevatedBg, borderRadius: RADIUS.md }}>
+              <span style={{ fontSize: 11, color: c.textSecondary, display: 'block', marginBottom: 4 }}>Notes</span>
+              <p style={{ margin: 0, fontSize: 13, color: c.textPrimary, lineHeight: 1.5 }}>{v.notes}</p>
+            </div>
+          )}
+        </InfoCard>
+      </>
+    );
+  }
+
+  // ── LEGACY FORMAT (flat fields) ───────────────────────────────────────────
+  // Customers created before the redesign — read flat vehicleMake, vehicleModel, etc.
+  return (
+    <>
+      <InfoCard title="Vehicle Details" c={c}>
+        <InfoGrid>
+          <InfoRow label="Registration No." value={customer.vehicleNo}         mono c={c} highlight />
+          <InfoRow label="Make / Company"   value={customer.vehicleMake}        c={c} />
+          <InfoRow label="Model"            value={customer.vehicleModel}       c={c} />
+          <InfoRow label="Year"             value={customer.vehicleYear}        c={c} />
+          <InfoRow
+            label="Emission Category"
+            value={customer.emissionCategory}
+            c={c}
+            badge={customer.emissionCategory ? { variant: 'info', text: customer.emissionCategory } : undefined}
+          />
+        </InfoGrid>
+      </InfoCard>
+
+      <InfoCard title="CNG Kit Details" c={c}>
+        <InfoGrid>
+          <InfoRow label="Kit Brand"     value={customer.cngKitBrand}                                       c={c} />
+          <InfoRow label="Kit Model"     value={customer.cngKitModel}                                       c={c} />
+          <InfoRow label="Tank Capacity" value={customer.tankCapacity ? `${customer.tankCapacity} Litres` : null} c={c} />
+        </InfoGrid>
+        {customer.advancers?.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <span style={{ fontSize: 12, color: c.textSecondary, display: 'block', marginBottom: 6 }}>Advancers</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {customer.advancers.map((a) => <Badge key={a} variant="info">{a}</Badge>)}
+            </div>
+          </div>
+        )}
+        {customer.addOns?.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <span style={{ fontSize: 12, color: c.textSecondary, display: 'block', marginBottom: 6 }}>Add-Ons</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {customer.addOns.map((a) => <Badge key={a} variant="warning">{a}</Badge>)}
+            </div>
+          </div>
+        )}
+      </InfoCard>
+
+      <InfoCard title="Installation Details" c={c}>
+        <InfoGrid>
+          <InfoRow label="Installation Date" value={fmt(customer.installationDate)} c={c} />
+          <InfoRow label="Technician"         value={customer.technicianName}        c={c} />
+        </InfoGrid>
+        {customer.notes && (
+          <div style={{ marginTop: 12, padding: '10px 12px', background: c.elevatedBg, borderRadius: RADIUS.md }}>
+            <span style={{ fontSize: 11, color: c.textSecondary, display: 'block', marginBottom: 4 }}>Notes</span>
+            <p style={{ margin: 0, fontSize: 13, color: c.textPrimary, lineHeight: 1.5 }}>{customer.notes}</p>
+          </div>
+        )}
+      </InfoCard>
+    </>
   );
 }
 

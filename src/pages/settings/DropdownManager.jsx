@@ -1,34 +1,15 @@
-// SGA — Last updated: Addressed ⚠️ Bug 11.3 — Added explanatory comment documenting
-// why an empty or non-existent /settings Firestore document is handled safely. The
-// component already had correct defensive coding (`settings.dropdowns || {}`  and
-// `dropdowns[cat.key] || []`). The comment makes this explicit so it is never
-// accidentally removed in a future refactor. No logic has been changed.
-// ─────────────────────────────────────────────────────────────────────────────
-// src/pages/Settings/components/Owner/DropdownManager.jsx
-//
-// Owner: manage dropdown options for CNG Kit Brand, Model, Add-Ons, Advancers,
-// Vehicle Emission Category, Technician Names, Payment Terms.
-// Changes write to Firestore and immediately reflect in all forms.
-//
-// ── EMPTY /settings DOC SAFETY NOTE (⚠️ Bug 11.3 — addressed) ─────────────
-// If the /settings document does not yet exist in Firestore (e.g. on a fresh
-// deployment before the SuperAdmin seeds defaults), this component handles it
-// safely at two levels:
-//
-//   1. useSettings() returns `{ settings: { dropdowns: undefined, ... } }`
-//      when the doc is missing. The line:
-//        const dropdowns = settings.dropdowns || {};
-//      ensures `dropdowns` is always an object, never undefined/null.
-//
-//   2. Each DropdownCategory receives:
-//        initialValues={dropdowns[cat.key] || []}
-//      so `initialValues` is always an array. If no values exist, the
-//      component renders the "No options yet. Add one below." empty state,
-//      which is exactly the correct UX for a fresh installation.
-//
-// There is no crash path here. The empty state is intentional and
-// user-friendly. No seeding of defaults is required for the UI to work.
-// ─────────────────────────────────────────────────────────────────────────────
+// SGA — Last updated: Added 4 new CNG Kit dropdown categories (cngKits, ckpAdvancers, extraItems, cylinders) for use in Customer CNG Kit step
+/**
+ * DropdownManager — Shree Ganesh Automobile
+ * Owner: manage dropdown options for all CNG-related form dropdowns.
+ *
+ * ── EMPTY /settings DOC SAFETY NOTE (⚠️ Bug 11.3 — addressed) ─────────────
+ * If the /settings document does not yet exist in Firestore (e.g. on a fresh
+ * deployment), this component handles it safely. `settings.dropdowns || {}`
+ * ensures `dropdowns` is always an object. Each DropdownCategory receives
+ * `initialValues={dropdowns[cat.key] || []}` which is always an array.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 
 import React, { useState } from "react";
 import { SectionCard, FieldRow, Input, Button, SaveRow, T } from "./SettingsUI";
@@ -36,29 +17,30 @@ import { saveDropdownValues } from "../../lib/settingsService";
 import { useSettings } from "../../hooks/useSettings";
 
 const DROPDOWN_CATEGORIES = [
+  // ── Original categories (unchanged) ────────────────────────────────────────
   {
     key: "cngKitBrands",
     label: "CNG Kit Brands",
     icon: "⚙️",
-    hint: "Used in Customer Record — CNG Kit Brand field",
+    hint: "Used in Customer Record — CNG Kit Brand field (legacy)",
   },
   {
     key: "cngKitModels",
     label: "CNG Kit Models",
     icon: "🔧",
-    hint: "Used in Customer Record — CNG Kit Model field",
+    hint: "Used in Customer Record — CNG Kit Model field (legacy)",
   },
   {
     key: "addOns",
     label: "Add-Ons",
     icon: "➕",
-    hint: "Used in Customer Record — Add-Ons multi-select",
+    hint: "Used in Customer Record — Add-Ons multi-select (legacy)",
   },
   {
     key: "advancers",
     label: "Advancers",
     icon: "⬆️",
-    hint: "Used in Customer Record — Advancers multi-select",
+    hint: "Used in Customer Record — Advancers multi-select (legacy)",
   },
   {
     key: "vehicleEmissionCategories",
@@ -78,10 +60,39 @@ const DROPDOWN_CATEGORIES = [
     icon: "💳",
     hint: "Quick-select options for invoice payment terms",
   },
+  // ── NEW CNG Kit installation categories ────────────────────────────────────
+  {
+    key: "cngKits",
+    label: "CNG Kits",
+    icon: "🔩",
+    hint: "Used in Customer CNG Kit step — CNG Kit selection dropdown (select from list or enter manually)",
+    isNew: true,
+  },
+  {
+    key: "ckpAdvancers",
+    label: "CKP Advancers",
+    icon: "⚡",
+    hint: "Used in Customer CNG Kit step — CKP Advancer selection dropdown (select from list or enter manually)",
+    isNew: true,
+  },
+  {
+    key: "extraItems",
+    label: "Extras",
+    icon: "📦",
+    hint: "Used in Customer CNG Kit step — Extras selection dropdown (select from list or enter manually)",
+    isNew: true,
+  },
+  {
+    key: "cylinders",
+    label: "Cylinders",
+    icon: "🫙",
+    hint: "Used in Customer CNG Kit step — Cylinder selection dropdown (select from list or enter manually)",
+    isNew: true,
+  },
 ];
 
 // One accordion panel per dropdown category
-function DropdownCategory({ categoryKey, label, icon, hint, initialValues }) {
+function DropdownCategory({ categoryKey, label, icon, hint, initialValues, isNew }) {
   const { patchDropdown } = useSettings();
   const [values, setValues] = useState(initialValues);
   const [newItem, setNewItem] = useState("");
@@ -164,7 +175,14 @@ function DropdownCategory({ categoryKey, label, icon, hint, initialValues }) {
       >
         <span style={{ fontSize: 16 }}>{icon}</span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>{label}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {label}
+            {isNew && (
+              <span style={{ fontSize: 9, fontWeight: 700, background: '#E8F5E9', color: '#1A7A1A', padding: '2px 6px', borderRadius: 10, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                NEW
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: T.textMeta }}>{hint}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -311,6 +329,7 @@ export default function DropdownManager() {
           label={cat.label}
           icon={cat.icon}
           hint={cat.hint}
+          isNew={!!cat.isNew}
           // `|| []` ensures DropdownCategory always receives an array,
           // even if this specific key doesn't exist in the settings doc yet.
           initialValues={dropdowns[cat.key] || []}

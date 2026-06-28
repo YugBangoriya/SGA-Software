@@ -1,8 +1,4 @@
-// SGA — Last updated: Addressed ⚠️ Bug 4.1 — Added explanatory comment on the inventory
-// useEffect to document why loading inventory data even when invoiceDbLocked is true is
-// safe by design. The lock targets the /invoices Firestore collection; the /inventory
-// collection is a separate collection with its own security rules and is unaffected by
-// the lock flag. No logic or UI has been changed.
+// SGA — Last updated: Extended item search to include shortcut/alias field for fast lookup during invoice creation
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -74,10 +70,13 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
   }, []);
 
   const filteredInventory = inventory.filter((item) => {
-    const q = search.toLowerCase();
+    const q = search.toLowerCase().trim();
+    if (!q) return true;
     return (
       item.itemName?.toLowerCase().includes(q) ||
-      item.category?.toLowerCase().includes(q)
+      item.category?.toLowerCase().includes(q) ||
+      // NEW — search by shortcut/alias so typing e.g. "ms" finds "M.S. Connector"
+      (item.shortcut && item.shortcut.toLowerCase().includes(q))
     );
   });
 
@@ -718,6 +717,12 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                           {alreadyAdded && (
                             <span style={{ marginLeft: 8, fontSize: 10, color: "#1A7A1A", fontWeight: 600 }}>
                               ✓ Added
+                            </span>
+                          )}
+                          {/* NEW — show shortcut badge in picker */}
+                          {item.shortcut && (
+                            <span style={{ marginLeft: 6, fontSize: 10, background: '#E3F2FD', color: '#0055CC', padding: '1px 6px', borderRadius: 3, fontWeight: 600, fontFamily: "'Courier New', monospace", letterSpacing: 0.5 }}>
+                              {item.shortcut}
                             </span>
                           )}
                         </div>
