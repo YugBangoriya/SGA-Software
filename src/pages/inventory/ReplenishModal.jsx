@@ -1,4 +1,4 @@
-// SGA — Last updated: Added sellingPrice field to replenish modal; also updates selling price in Firestore on replenish
+// SGA — Last updated: Added invoiceRef (Invoice/Order Reference) field to track supplier invoice numbers per replenishment batch
 /**
  * ReplenishModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add more stock to an EXISTING inventory item.
@@ -9,10 +9,11 @@
  *  - Quantity field adds ON TOP of existing quantity (handled in service)
  *  - Purchase price can differ from previous batch (new batch price)
  *  - Date defaults to today; manual change triggers amber highlight
+ *  - NEW: invoiceRef — optional alphanumeric supplier invoice / PO reference number
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { X, RefreshCw, AlertTriangle, TrendingUp, Package } from 'lucide-react';
+import { X, RefreshCw, AlertTriangle, TrendingUp, Package, FileText } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
 import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
 import { QuantityDisplay, StockStatusBadge } from './index';
@@ -80,6 +81,7 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
     sellingPrice:          item.sellingPrice != null ? String(item.sellingPrice) : '',
     dateOrderedOrReceived: today,
     vendorName:            item.vendorName ?? '',
+    invoiceRef:            '',   // NEW — always starts blank; each batch has its own supplier invoice
     notes:                 '',
   });
 
@@ -135,6 +137,7 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
           sellingPrice:          form.sellingPrice !== '' ? Number(form.sellingPrice) : null,
           dateOrderedOrReceived: form.dateOrderedOrReceived,
           vendorName:            form.vendorName.trim(),
+          invoiceRef:            form.invoiceRef.trim(),   // NEW
           notes:                 form.notes.trim(),
           isDateManuallySet,
         },
@@ -167,7 +170,7 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
         borderRadius:  '20px 20px 0 0',
         width:         '100%',
         maxWidth:      580,
-        maxHeight:     '90vh',
+        maxHeight:     '92vh',
         overflow:      'hidden',
         display:       'flex',
         flexDirection: 'column',
@@ -369,6 +372,27 @@ export default function ReplenishModal({ item, user, onClose, onSuccess }) {
               onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
               onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
             />
+          </FormField>
+
+          {/* NEW — Invoice / Order Reference */}
+          <FormField
+            label="Invoice / Order Reference"
+            hint="Optional — supplier's invoice number or purchase order number for this batch"
+          >
+            <div style={{ position: 'relative' }}>
+              <FileText
+                size={13}
+                style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: COLORS.textMuted }}
+              />
+              <input
+                value={form.invoiceRef}
+                onChange={set('invoiceRef')}
+                placeholder="e.g. INV-2026-001, PO-123"
+                style={inputStyle(false, { paddingLeft: 32, fontFamily: TYPOGRAPHY.mono, letterSpacing: 0.3 })}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
+              />
+            </div>
           </FormField>
 
           <FormField label="Batch Notes" hint="Optional — e.g. 'Urgent stock refill before Diwali'">

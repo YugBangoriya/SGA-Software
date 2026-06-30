@@ -1,5 +1,16 @@
-// SGA — Last updated: Bug Fix #1 — Added /invoices/return/new route + CreateReturnInvoice import (was missing, causing Return button to redirect to Home)
-// src/App.jsx — FIXED: All modules wired to real components
+// SGA — Last updated: Removed ROLES.EMPLOYEE from /inventory and /inventory/:itemId routes; employees redirected to /unauthorized if they attempt direct navigation (Request 3)
+// src/App.jsx — All modules wired to real components
+//
+// REQUEST 3 CHANGE:
+//   /inventory       → allowedRoles now [SUPERADMIN, OWNER] only (was + EMPLOYEE)
+//   /inventory/:itemId → allowedRoles now [SUPERADMIN, OWNER] only (was + EMPLOYEE)
+//
+//   Employees who attempt to navigate directly to /inventory (e.g. via the
+//   browser address bar) are redirected to /unauthorized by ProtectedRoute.
+//   Employees can still access inventory items during invoice creation because
+//   InvoiceStepItems.jsx performs a direct Firestore query — it does not use
+//   the /inventory route at all. The Firestore security rules still allow
+//   employee reads on /inventory documents, which is required for that flow.
 
 import { useEffect }           from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -80,9 +91,6 @@ export default function App() {
        * a JS error during render, the entire app does NOT go blank.
        * Instead the ErrorBoundary catches it, shows a recovery screen,
        * and lets the user navigate away without a full page refresh.
-       *
-       * This fixes the intermittent blank screen issue on:
-       * Messaging, Quotations, Reminders, Car Repo, Docs Repo, Admin, Settings
        */}
       <ErrorBoundary>
         <Routes>
@@ -111,20 +119,32 @@ export default function App() {
           } />
 
           {/* ── Phase 3: Inventory ──────────────────────────────────────── */}
+          {/*
+           * REQUEST 3: ROLES.EMPLOYEE removed from both inventory routes.
+           *
+           * Employees who visit /inventory directly (e.g. via browser address bar
+           * or a stale bookmark) will be redirected to /unauthorized by
+           * ProtectedRoute, exactly like Messaging or Quotations.
+           *
+           * Employees can still SELECT inventory items during invoice creation
+           * (Step 2 — InvoiceStepItems.jsx) because that component queries
+           * Firestore directly and does not use this route at all.
+           * The Firestore security rules are NOT changed — employee reads on
+           * /inventory documents remain permitted so the invoice flow works.
+           */}
           <Route path="/inventory" element={
-            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
               <InventoryPage />
             </ProtectedRoute>
           } />
           {/*
-           * FIX: Changed :id → :itemId so ItemDetailPage's useParams() correctly
-           * receives { itemId } instead of { id }. The old :id param meant
-           * `const { itemId } = useParams()` always returned undefined, which caused
-           * Firebase doc() to call undefined.indexOf('/') internally → the
-           * "Cannot read properties of undefined (reading 'indexOf')" error.
+           * FIX (preserved): Changed :id → :itemId so ItemDetailPage's useParams()
+           * correctly receives { itemId } instead of { id }.
+           *
+           * REQUEST 3: ROLES.EMPLOYEE also removed from the item detail route.
            */}
           <Route path="/inventory/:itemId" element={
-            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER, ROLES.EMPLOYEE]}>
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
               <ItemDetailPage />
             </ProtectedRoute>
           } />

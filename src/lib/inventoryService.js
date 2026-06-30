@@ -1,4 +1,4 @@
-// SGA — Last updated: Added shortcut/alias field support — stored on items and searched during invoice creation
+// SGA — Last updated: Added invoiceRef field to add/replenish; added updateRestockEntry (edit restock history entries with qty delta transaction)
 /**
  * Inventory Service — Shree Ganesh Automobile
  * All Firestore read/write operations for the Inventory module.
@@ -10,6 +10,10 @@
  * NEW (Request 1 — Untracked Items): Items with isUntracked: true have no stock ceiling.
  * NEW (Request 2 — Local Items): Items in category 'Local Items' are auto-created by invoiceApproval.js
  * NEW (Request 3 — Shortcut/Alias): Items can have a shortcut field for fast search in invoice creation.
+ * NEW (Request 4 — Invoice/Order Ref): restockHistory entries can store an optional invoiceRef string.
+ * NEW (Request 5 — Edit Restock Entry): updateRestockEntry allows Owner+ to correct a restock history record.
+ *   When quantity changes, uses a Firestore transaction to atomically adjust the parent item's stock count.
+ * NEW (Request 6 — Item field editors): updateItemFields allows Owner+ to update category, vendor, lastRestockedDate.
  *
  * Collections:
  *   /inventory                     — main item documents
@@ -65,13 +69,14 @@ export const addInventoryItem = async ({ itemData, user }) => {
     itemName, shortcut, categoryId, quantityAdded, purchasePrice,
     sellingPrice, dateOrderedOrReceived, vendorName, lowStockThreshold,
     isDateManuallySet, notes, isUntracked,
+    invoiceRef,   // NEW — optional supplier invoice / order reference number
   } = itemData;
 
   const orderTimestamp = dateOrderedOrReceived ? toTimestamp(dateOrderedOrReceived) : serverTimestamp();
 
   const newItem = {
     itemName:              itemName.trim(),
-    shortcut:              shortcut?.trim() || '',   // NEW — alias for fast invoice search
+    shortcut:              shortcut?.trim() || '',
     categoryId:            categoryId || '',
     purchasePrice:         purchasePrice !== '' && purchasePrice != null ? Number(purchasePrice) : null,
     sellingPrice:          sellingPrice  != null && sellingPrice  !== '' ? Number(sellingPrice)  : null,
@@ -97,19 +102,30 @@ export const addInventoryItem = async ({ itemData, user }) => {
 
   if (!isUntracked) {
     await addDoc(collection(db, INV, itemRef.id, 'restockHistory'), {
-      date: orderTimestamp, quantityAdded: Number(quantityAdded),
-      purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null,
-      vendorName: vendorName?.trim() || '', notes: notes?.trim() || '',
-      addedBy: user.uid, addedByName: user.displayName || user.email,
-      addedAt: serverTimestamp(), isDateManuallySet: isDateManuallySet ?? false,
-      entryType: 'INITIAL',
+      date:              orderTimestamp,
+      quantityAdded:     Number(quantityAdded),
+      purchasePrice:     purchasePrice !== '' ? Number(purchasePrice) : null,
+      vendorName:        vendorName?.trim() || '',
+      invoiceRef:        invoiceRef?.trim() || '',   // NEW — supplier invoice / order ref
+      notes:             notes?.trim() || '',
+      addedBy:           user.uid,
+      addedByName:       user.displayName || user.email,
+      addedAt:           serverTimestamp(),
+      isDateManuallySet: isDateManuallySet ?? false,
+      entryType:         'INITIAL',
     });
   }
 
   await logAudit({
     action: 'inventory.added', userId: user.uid, userName: user.displayName || user.email,
     targetId: itemRef.id, targetCollection: INV,
-    metadata: { itemName, shortcut: shortcut?.trim() || '', quantityAdded: isUntracked ? null : Number(quantityAdded), purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null, isUntracked: !!isUntracked, categoryId },
+    metadata: {
+      itemName, shortcut: shortcut?.trim() || '',
+      quantityAdded: isUntracked ? null : Number(quantityAdded),
+      purchasePrice: purchasePrice !== '' ? Number(purchasePrice) : null,
+      invoiceRef: invoiceRef?.trim() || '',
+      isUntracked: !!isUntracked, categoryId,
+    },
   });
 
   return itemRef.id;
@@ -118,7 +134,12 @@ export const addInventoryItem = async ({ itemData, user }) => {
 // ─── REPLENISH EXISTING ITEM ──────────────────────────────────────────────────
 
 export const replenishInventoryItem = async ({ itemId, replenishData, user }) => {
-  const { quantityAdded, purchasePrice, sellingPrice, dateOrderedOrReceived, vendorName, isDateManuallySet, notes } = replenishData;
+  const {
+    quantityAdded, purchasePrice, sellingPrice,
+    dateOrderedOrReceived, vendorName, isDateManuallySet, notes,
+    invoiceRef,   // NEW — optional supplier invoice / order reference number
+  } = replenishData;
+
   const orderTimestamp = dateOrderedOrReceived ? toTimestamp(dateOrderedOrReceived) : serverTimestamp();
 
   await runTransaction(db, async (transaction) => {
@@ -141,16 +162,111 @@ export const replenishInventoryItem = async ({ itemId, replenishData, user }) =>
   });
 
   await addDoc(collection(db, INV, itemId, 'restockHistory'), {
-    date: orderTimestamp, quantityAdded: Number(quantityAdded),
-    purchasePrice: Number(purchasePrice), vendorName: vendorName?.trim() || '',
-    notes: notes?.trim() || '', addedBy: user.uid, addedByName: user.displayName || user.email,
-    addedAt: serverTimestamp(), isDateManuallySet: isDateManuallySet ?? false, entryType: 'REPLENISH',
+    date:              orderTimestamp,
+    quantityAdded:     Number(quantityAdded),
+    purchasePrice:     Number(purchasePrice),
+    vendorName:        vendorName?.trim() || '',
+    invoiceRef:        invoiceRef?.trim() || '',   // NEW — supplier invoice / order ref
+    notes:             notes?.trim() || '',
+    addedBy:           user.uid,
+    addedByName:       user.displayName || user.email,
+    addedAt:           serverTimestamp(),
+    isDateManuallySet: isDateManuallySet ?? false,
+    entryType:         'REPLENISH',
   });
 
   await logAudit({
     action: 'inventory.replenished', userId: user.uid, userName: user.displayName || user.email,
     targetId: itemId, targetCollection: INV,
-    metadata: { quantityAdded: Number(quantityAdded), purchasePrice: Number(purchasePrice), vendorName },
+    metadata: {
+      quantityAdded: Number(quantityAdded),
+      purchasePrice: Number(purchasePrice),
+      vendorName,
+      invoiceRef: invoiceRef?.trim() || '',
+    },
+  });
+};
+
+// ─── EDIT EXISTING RESTOCK HISTORY ENTRY ─────────────────────────────────────
+//
+// Called when Owner/SuperAdmin corrects a previously saved restock entry.
+//
+// IMPORTANT: If quantityAdded changes AND the parent item is tracked (not
+// isUntracked), this function runs a Firestore transaction to atomically:
+//   1. Adjust the parent item's stock count by the delta (new - old).
+//   2. Update the restockHistory document.
+//
+// If quantityAdded is unchanged or the item is untracked, only the
+// restockHistory document is updated (no transaction needed).
+
+export const updateRestockEntry = async ({
+  itemId,
+  entryId,
+  updates,             // { date?, quantityAdded?, purchasePrice?, vendorName?, invoiceRef?, notes?, isDateManuallySet? }
+  originalQuantityAdded,
+  isUntracked,
+  user,
+}) => {
+  const entryRef = doc(db, INV, itemId, 'restockHistory', entryId);
+
+  // Convert date string to Firestore Timestamp if the date field changed
+  const firestoreUpdates = { ...updates };
+  if (firestoreUpdates.date && typeof firestoreUpdates.date === 'string') {
+    firestoreUpdates.date = toTimestamp(firestoreUpdates.date);
+  }
+
+  const newQty = firestoreUpdates.quantityAdded !== undefined
+    ? Number(firestoreUpdates.quantityAdded)
+    : Number(originalQuantityAdded);
+
+  const quantityChanged = newQty !== Number(originalQuantityAdded);
+
+  if (quantityChanged && !isUntracked) {
+    // Must atomically adjust parent item's stock count
+    const delta = newQty - Number(originalQuantityAdded);
+
+    await runTransaction(db, async (transaction) => {
+      const itemRef  = doc(db, INV, itemId);
+      const itemSnap = await transaction.get(itemRef);
+      if (!itemSnap.exists()) throw new Error('Inventory item not found');
+
+      // Adjust parent quantity by delta
+      transaction.update(itemRef, {
+        quantity:       increment(delta),
+        lastUpdatedAt:  serverTimestamp(),
+        lastUpdatedBy:  user.uid,
+      });
+
+      // Update the restock history entry
+      transaction.update(entryRef, {
+        ...firestoreUpdates,
+        editedAt:      serverTimestamp(),
+        editedBy:      user.uid,
+        editedByName:  user.displayName || user.email,
+      });
+    });
+  } else {
+    // No quantity change — simple document update
+    await updateDoc(entryRef, {
+      ...firestoreUpdates,
+      editedAt:     serverTimestamp(),
+      editedBy:     user.uid,
+      editedByName: user.displayName || user.email,
+    });
+  }
+
+  await logAudit({
+    action: 'inventory.restock_entry_updated',
+    userId: user.uid,
+    userName: user.displayName || user.email,
+    targetId: itemId,
+    targetCollection: INV,
+    metadata: {
+      entryId,
+      updates: { ...updates, date: updates.date || '(unchanged)' },
+      originalQuantityAdded,
+      quantityDelta: quantityChanged ? (newQty - Number(originalQuantityAdded)) : 0,
+    },
   });
 };
 

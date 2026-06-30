@@ -1,11 +1,11 @@
-// SGA — Last updated: Added optional shortcut/alias field for fast item search in invoice creation
+// SGA — Last updated: Added optional Invoice/Order Reference (invoiceRef) field in Receipt Details section
 /**
  * AddInventoryModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add a brand-new inventory item.
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { X, Package, Calendar, Tag, Hash, Truck, AlertTriangle, Info, ToggleLeft, ToggleRight, Zap } from 'lucide-react';
+import { X, Package, Calendar, Tag, Hash, Truck, AlertTriangle, Info, ToggleLeft, ToggleRight, Zap, FileText } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
 import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
 
@@ -46,13 +46,14 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
 
   const [form, setForm] = useState({
     itemName:              '',
-    shortcut:              '',   // NEW — optional alias/shorthand for invoice search
+    shortcut:              '',
     categoryId:            '',
     quantityAdded:         '',
     purchasePrice:         '',
     sellingPrice:          '',
     dateOrderedOrReceived: today,
     vendorName:            '',
+    invoiceRef:            '',   // NEW — optional supplier invoice / order reference number
     lowStockThreshold:     '5',
     notes:                 '',
   });
@@ -106,13 +107,14 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
       await addItem(
         {
           itemName:              form.itemName.trim(),
-          shortcut:              form.shortcut.trim(),   // NEW
+          shortcut:              form.shortcut.trim(),
           categoryId:            form.categoryId,
           quantityAdded:         isUntracked ? null : Number(form.quantityAdded),
           purchasePrice:         form.purchasePrice !== '' ? Number(form.purchasePrice) : null,
           sellingPrice:          form.sellingPrice  !== '' ? Number(form.sellingPrice)  : null,
           dateOrderedOrReceived: form.dateOrderedOrReceived,
           vendorName:            form.vendorName.trim(),
+          invoiceRef:            form.invoiceRef.trim(),   // NEW
           lowStockThreshold:     isUntracked ? null : Number(form.lowStockThreshold),
           notes:                 form.notes.trim(),
           isDateManuallySet,
@@ -174,7 +176,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             />
           </FormField>
 
-          {/* NEW — Shortcut / Alias field */}
+          {/* Shortcut / Alias field */}
           <FormField
             label="Search Shortcut / Alias"
             hint="Optional — short code for fast search during invoice creation (e.g. 'ms' for 'M.S. Connector')"
@@ -288,7 +290,7 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
             </div>
           )}
 
-          {/* Date & Vendor */}
+          {/* Date & Vendor & Invoice Ref */}
           <SectionHeading icon={<Calendar size={14} />} label="Receipt Details" />
 
           <FormField label="Date Ordered / Received" required error={errors.dateOrderedOrReceived} hint={isDateManuallySet ? undefined : 'Defaults to today'}>
@@ -316,6 +318,24 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
               onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
               onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
             />
+          </FormField>
+
+          {/* NEW — Invoice / Order Reference */}
+          <FormField
+            label="Invoice / Order Reference"
+            hint="Optional — supplier's invoice number or purchase order number for this batch"
+          >
+            <div style={{ position: 'relative' }}>
+              <FileText size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: COLORS.textMuted }} />
+              <input
+                value={form.invoiceRef}
+                onChange={set('invoiceRef')}
+                placeholder="e.g. INV-2026-001, PO-123"
+                style={inputStyle(false, { paddingLeft: 32, fontFamily: TYPOGRAPHY.mono, letterSpacing: 0.3 })}
+                onFocus={(e) => (e.target.style.borderColor = COLORS.primary)}
+                onBlur={(e)  => (e.target.style.borderColor = COLORS.tableHeader)}
+              />
+            </div>
           </FormField>
 
           <FormField label="Internal Notes" hint="Optional — Owner and SuperAdmin only">

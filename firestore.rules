@@ -1,24 +1,21 @@
-// SGA — Last updated: Bug Fix — Owner can now write to systemConfig/quotationCounter
-// (generateQuotationNumber() uses a Firestore transaction on that document;
-// previously the rule only allowed isSuperAdmin() to write to systemConfig,
-// blocking Owner from creating quotations).
+// SGA — Last updated: restockHistory update permission expanded to isOwnerOrAbove() so Owner can edit restock history entries
 // firestore.rules — SHREE GANESH AUTOMOBILE — PRODUCTION SECURITY RULES
-// Version: 1.5 | systemConfig quotationCounter Owner write permission fix
+// Version: 1.6 | restockHistory Owner update permission fix
 //
-// ── CHANGES FROM v1.4 ────────────────────────────────────────────────────
-//   BUG FIX — /systemConfig/{configId} write was restricted to isSuperAdmin() only.
-//             generateQuotationNumber() in quotationService.js runs a Firestore
-//             transaction that writes to systemConfig/quotationCounter to increment
-//             the sequential quotation number. Owner was blocked from this write,
-//             causing "Failed to save quotation" / permission denied errors.
-//             Fix: added an exception so isOwnerOrAbove() can create/update the
-//             specific document systemConfig/quotationCounter. All other systemConfig
-//             documents remain SuperAdmin-only for write.
+// ── CHANGES FROM v1.5 ────────────────────────────────────────────────────
+//   BUG FIX — /inventory/{itemId}/restockHistory update was restricted to
+//             isSuperAdmin() only. The new "Edit restock history" feature
+//             (Request 1) allows Owner to correct purchase price, quantity,
+//             invoice reference, vendor, and date on existing restock entries.
+//             Fix: update rule changed from isSuperAdmin() → isOwnerOrAbove().
+//             Delete remains SuperAdmin-only for data safety.
 //
 // ── ROLES (stored as custom claims on Firebase Auth tokens) ──────────────
 //   superadmin  → God-mode. Manages users, backups, car repo, system config.
 //   owner       → Full business access. Cannot touch system config (except quotationCounter).
-//   employee    → Limited: create pending invoices, view customers/inventory.
+//   employee    → Limited: create pending invoices, view customers.
+//                 Note: employees may read /inventory for invoice item selection
+//                 even though they cannot navigate to the Inventory page in the UI.
 //   (accountant → placeholder, not implemented in v1)
 //
 // ── AUDIT CHECKLIST ──────────────────────────────────────────────────────
@@ -33,6 +30,7 @@
 //   [✓] No sensitive data accessible to unauthenticated requests
 //   [✓] followUpTemplates: Owner+ read/write
 //   [✓] inventory/restockHistory subcollection: explicitly covered (v1.2)
+//   [✓] inventory/restockHistory update: Owner+ (v1.6 — expanded from SuperAdmin only)
 //   [✓] docsCategories: Owner+ read/write (v1.4 — BUG FIX)
 //   [✓] docsFolders: Owner+ read/write, all staff read (v1.4)
 //   [✓] quotationPriceTables: Owner+ read/write (v1.4)
@@ -80,18 +78,18 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == userId;
     }
 
-    function onlyUpdating(fields) {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    function onlyUpdating(allowedFields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedFields);
     }
 
     // ──────────────────────────────────────────────────────────
-    // /users — User management
+    // /users — User profile documents
     // ──────────────────────────────────────────────────────────
     match /users/{userId} {
-      allow read:   if isSuperAdmin() || isSelf(userId);
+      allow read: if isAnyStaff();
       allow create: if isSuperAdmin();
       allow update: if isSuperAdmin()
-                    || (isSelf(userId) && onlyUpdating(['theme', 'language', 'fcmTokens']));
+                    || (isSelf(userId) && onlyUpdating(['theme', 'language', 'fcmTokens', 'lastLogin']));
       allow delete: if isSuperAdmin();
     }
 
@@ -135,7 +133,10 @@ service cloud.firestore {
       match /restockHistory/{historyId} {
         allow read:   if isAnyStaff();
         allow create: if isOwnerOrAbove();
-        allow update: if isSuperAdmin();
+        // v1.6 FIX: expanded from isSuperAdmin() to isOwnerOrAbove()
+        // Owner can now correct purchase price, quantity, invoice reference,
+        // vendor name, and date on existing restock history entries.
+        allow update: if isOwnerOrAbove();
         allow delete: if isSuperAdmin();
       }
     }

@@ -1,4 +1,4 @@
-// SGA — Last updated: Added toggleTrackingMode action (isUntracked toggle); fetchItems lowStock filter excludes untracked items; added updateLocalPurchasePrice action
+// SGA — Last updated: Added updateRestockEntry action for editing restock history entries
 /**
  * Inventory Store — Shree Ganesh Automobile
  * Zustand global state for the Inventory module.
@@ -17,6 +17,7 @@ import {
   updateLowStockThreshold,
   updateTrackingMode,
   updateLocalItemPurchasePrice,
+  updateRestockEntry,     // NEW — edit restock history entries
   addCategory,
   updateCategory,
   deleteCategory,
@@ -151,6 +152,25 @@ const useInventoryStore = create((set, get) => ({
     await get().fetchItems();
     if (get().selectedItem?.id === itemId) {
       await get().fetchItem(itemId);
+    }
+  },
+
+  /**
+   * Edit an existing restock history entry.
+   * If quantityAdded changes and the item is tracked (not untracked), the
+   * service runs a Firestore transaction to adjust the parent item's stock
+   * count by the delta (new qty - original qty).
+   *
+   * After saving, the selectedItem and restockHistory are refreshed so the
+   * ItemDetailPage reflects the latest values immediately.
+   */
+  updateRestockEntry: async ({ itemId, entryId, updates, originalQuantityAdded, isUntracked, user }) => {
+    await updateRestockEntry({ itemId, entryId, updates, originalQuantityAdded, isUntracked, user });
+    // Refresh the item (stock count may have changed) and history list
+    await get().fetchItems();
+    if (get().selectedItem?.id === itemId) {
+      await get().fetchItem(itemId);
+      await get().fetchRestockHistory(itemId);
     }
   },
 
