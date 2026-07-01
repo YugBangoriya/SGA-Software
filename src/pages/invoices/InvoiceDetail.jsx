@@ -1,4 +1,4 @@
-// SGA — Last updated: Added discount display in invoice detail view; added return invoice approval routing (approveReturnInvoice) (shows Invoice Total, Discount, Revised Total when discount > 0)
+// SGA — Last updated: Added Edit button in header for Owner/SuperAdmin; navigates to /invoices/:id/edit
 // ============================================================
 // InvoiceDetail.jsx — View, reprint, resend, approve invoice
 // Phase 4 — Shree Ganesh Automobile
@@ -18,6 +18,7 @@ import DBLockedBanner from "../../components/invoices/DBLockedBanner";
 import {
   formatCurrency, formatDate, getDisplayStatus,
   generateAndDownloadPDF, sendInvoiceViaWhatsApp, isReturnInvoice,
+  PAYMENT_METHOD_LABELS,
 } from "../../lib/invoiceHelpers";
 
 export default function InvoiceDetail() {
@@ -214,6 +215,15 @@ export default function InvoiceDetail() {
         </div>
         {isOwnerOrAbove && inv && (
           <button
+            onClick={() => navigate(`/invoices/${id}/edit`)}
+            style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FFFFFF", display: "flex" }}
+            title="Edit invoice"
+          >
+            <Edit size={16} />
+          </button>
+        )}
+        {isOwnerOrAbove && inv && (
+          <button
             onClick={() => setConfirmDelete(true)}
             style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FFAAAA", display: "flex" }}
           >
@@ -357,7 +367,7 @@ export default function InvoiceDetail() {
                 />
               </div>
               <div style={{ marginTop: 8 }}>
-                <Row label="Payment Method" value={inv.paymentMethod || "—"} />
+                <Row label="Payment Method" value={PAYMENT_METHOD_LABELS[inv.paymentMethod] || inv.paymentMethod || "—"} />
                 {inv.loanProvider && <Row label="Provider" value={inv.loanProvider} />}
                 {inv.emiAmount && <Row label="EMI / Month" value={formatCurrency(inv.emiAmount)} mono />}
                 {inv.loanCompletionDate && <Row label="Est. Completion" value={formatDate(inv.loanCompletionDate)} />}

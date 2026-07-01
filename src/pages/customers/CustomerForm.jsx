@@ -1,4 +1,4 @@
-// SGA — Last updated: Complete redesign — multi-vehicle support, Car Repository integration in Step 2, soft duplicate check in Step 1, new CNG Kit form (4 fields) in Step 3, vehicle-aware Steps 3 & 4. Bug fix: DropdownOrManual now accepts c prop for full dark-mode support.
+// SGA — Last updated: Vehicle Registration Number and Emission Category made optional (client request); removed required validation and * indicator for both fields
 /**
  * CustomerForm.jsx — Shree Ganesh Automobile
  * Multi-step form for creating and editing customer records.
@@ -330,11 +330,8 @@ export default function CustomerForm() {
       // The duplicate check still runs as a soft warning but never blocks submission.
     }
     if (step === 2) {
-      const v = data.vehicles[0];
-      if (!v.vehicleNo.trim())
-        errs.vehicleNo = 'Vehicle registration number is required';
-      if (!v.emissionCategory)
-        errs.emissionCategory = 'Emission category is required';
+      // Vehicle registration number and emission category are optional — client decision.
+      // No validation required on these fields.
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -635,7 +632,6 @@ function Step2({ data, setVehicle, addVehicle, removeVehicle, errors, c, carRepo
           placeholder="e.g. GJ01AB1234"
           value={activeV.vehicleNo}
           onChange={(e) => setV('vehicleNo', e.target.value.toUpperCase())}
-          error={errors.vehicleNo}
           style={{ fontFamily: 'JetBrains Mono, monospace', letterSpacing: 1 }}
           autoFocus
         />
@@ -720,20 +716,19 @@ function Step2({ data, setVehicle, addVehicle, removeVehicle, errors, c, carRepo
           />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: errors.emissionCategory ? '#CC0000' : c.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 5 }}>
-            Emission Category <span style={{ color: '#CC0000' }}>*</span>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 5 }}>
+            Emission Category
           </label>
           <select
             value={activeV.emissionCategory}
             onChange={(e) => setV('emissionCategory', e.target.value)}
-            style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${errors.emissionCategory ? '#CC0000' : c.border}`, borderRadius: RADIUS.md, fontSize: 14, background: c.cardBg, color: activeV.emissionCategory ? c.textPrimary : c.textSecondary, outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${c.border}`, borderRadius: RADIUS.md, fontSize: 14, background: c.cardBg, color: activeV.emissionCategory ? c.textPrimary : c.textSecondary, outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}
           >
             <option value="">Select…</option>
             {(opts.emissionCategories || ['BS3', 'BS4', 'BS6', 'BS6 Phase 2']).map((ec) => (
               <option key={ec} value={ec}>{ec}</option>
             ))}
           </select>
-          {errors.emissionCategory && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#CC0000' }}>⚠ {errors.emissionCategory}</p>}
         </div>
       </div>
 

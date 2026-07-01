@@ -1,10 +1,10 @@
-// SGA — Last updated: Added Discount section between Invoice Total and Payment Method selection
+// SGA — Last updated: Bug fix — useEffect on mount pushes computed totalAmount to parent form so invoices are never saved with totalAmount=0; DEBIT payment method auto-sets amountPaid to 0
 // ============================================================
 // InvoiceStepPayment.jsx — Step 4: Payment Details + GST + Discount + Date
 // Phase 4 — Shree Ganesh Automobile
 // ============================================================
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Calendar, Info, Tag, Check } from "lucide-react";
 import {
   PAYMENT_METHODS,
@@ -55,6 +55,29 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
   const balanceDue = Math.max(0, totalAmount - (parseFloat(amountPaid) || 0));
   const paymentStatus = derivePaymentStatus(paymentMethod, amountPaid, totalAmount);
 
+  // ── BUG FIX: Push computed totals to the parent form immediately on mount.
+  // Without this, if the user arrives at step 4 without changing any payment
+  // field (e.g. Cash is already selected by default), the parent form's
+  // totalAmount stays at 0 from DEFAULT_FORM and the invoice is saved with
+  // totalAmount=0. That causes derivePaymentStatus to return "PAID" even when
+  // the customer only paid a partial amount (0 paid → PAID because 0 >= 0),
+  // which hides the invoice from the pending-payment / backup-protection logic.
+  // ──────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const disc = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
+    const initialTotal = parseFloat(Math.max(0, preDiscountTotal - disc).toFixed(2));
+    onChange({
+      subtotal,
+      cgst,
+      sgst,
+      preDiscountTotal,
+      discountAmount: disc,
+      totalAmount: initialTotal,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Intentionally empty — items and labourCost are frozen by the time
+           // the user reaches step 4; this is a one-time push on mount only.
+
   // Push updated totals including discount to parent form
   const pushTotals = (newDiscount) => {
     const disc = parseFloat(newDiscount || 0);
@@ -86,7 +109,9 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
     }
 
     if (field === "paymentMethod") {
-      updates.amountPaid = "";
+      // DEBIT: auto-set amount paid to 0 so the user sees the full balance due
+      // immediately. They can adjust it if a partial cash payment was also made.
+      updates.amountPaid = value === "DEBIT" ? "0" : "";
       updates.loanProvider = "";
       updates.emiAmount = "";
       updates.loanCompletionDate = "";

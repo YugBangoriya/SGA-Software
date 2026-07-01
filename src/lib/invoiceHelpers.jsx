@@ -1,4 +1,4 @@
-// SGA — Last updated: Cleanup — enrichSettingsWithLogo() is now the single source
+// SGA — Last updated: PAYMENT_METHODS: PARTIAL renamed to DEBIT (auto-zero amount on select); PAYMENT_METHOD_LABELS map added for display; requiresPartialFields updated for backward compat
 // of truth for logo resolution. It imports LOGO_BASE64 directly and guarantees it
 // always returns a valid base64 logo string (either the fetched/converted Firebase
 // Storage URL, or the embedded LOGO_BASE64 fallback). InvoicePDF.jsx and
@@ -118,13 +118,25 @@ export const PAYMENT_STATUS_LABELS = {
 };
 
 export const PAYMENT_METHODS = [
-  { value: "CASH",    label: "Cash" },
-  { value: "UPI",     label: "UPI" },
-  { value: "CARD",    label: "Card" },
-  { value: "LOAN",    label: "Loan" },
-  { value: "EMI",     label: "EMI" },
-  { value: "PARTIAL", label: "Partial Payment" },
+  { value: "CASH",   label: "Cash" },
+  { value: "UPI",    label: "UPI" },
+  { value: "CARD",   label: "Card" },
+  { value: "LOAN",   label: "Loan" },
+  { value: "EMI",    label: "EMI" },
+  { value: "DEBIT",  label: "Debit" },
 ];
+
+// Human-readable labels for display in InvoiceDetail, PendingPayments, etc.
+// Includes backward-compat entry for legacy "PARTIAL" invoices already in Firestore.
+export const PAYMENT_METHOD_LABELS = {
+  CASH:    "Cash",
+  UPI:     "UPI",
+  CARD:    "Card",
+  LOAN:    "Loan",
+  EMI:     "EMI",
+  DEBIT:   "Debit",
+  PARTIAL: "Partial Payment", // legacy — invoices created before the Debit rename
+};
 
 // Return invoice payment methods — no loan/emi for returns
 export const RETURN_PAYMENT_METHODS = [
@@ -134,7 +146,8 @@ export const RETURN_PAYMENT_METHODS = [
 ];
 
 export const requiresLoanFields    = (method) => ["LOAN", "EMI"].includes(method);
-export const requiresPartialFields = (method) => method === "PARTIAL";
+// PARTIAL kept for backward compat with pre-Debit invoices already in Firestore
+export const requiresPartialFields = (method) => method === "PARTIAL" || method === "DEBIT";
 
 // ── Derive paymentStatus from method + amounts ─────────────
 export const derivePaymentStatus = (method, amountPaid, totalAmount) => {

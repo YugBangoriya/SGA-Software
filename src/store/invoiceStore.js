@@ -1,4 +1,4 @@
-// SGA — Last updated: Fixed 9 logAudit() positional-argument calls — all calls in
+// SGA — Last updated: Added updateInvoice action for Owner/SuperAdmin edit-invoice feature
 // createInvoice, approveInvoice, rejectInvoice, deleteInvoice, updatePaymentStatus,
 // logPdfDownload, logWhatsAppSent, createReturnInvoice, and approveReturnInvoice were
 // calling logAudit("action", id, collection, {metadata}) which silently passed a string
@@ -551,6 +551,54 @@ const useInvoiceStore = create((set, get) => ({
           approvedByName:      currentUser.displayName || currentUser.email,
           totalReturnAmount:   invoice.totalReturnAmount,
           itemsRestocked:      invoice.returnItems?.length || 0,
+        },
+      });
+
+      set({ loading: false });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // ── update invoice (owner/superadmin edit) ─────────────────
+  // Can only edit invoices in PENDING or APPROVED state.
+  // Does NOT re-run inventory deduction — that only happens at approval time.
+  // The caller is responsible for passing a clean delta of fields to update.
+  updateInvoice: async (invoiceId, updates, currentUser) => {
+    const { dbLocked } = get();
+    if (dbLocked) throw new Error("Invoice database is currently locked.");
+    if (!currentUser) throw new Error("Authentication error. Please log out and log in again.");
+
+    set({ loading: true, error: null });
+    try {
+      const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
+
+      const updatedByName =
+        currentUser.displayName ||
+        currentUser.email ||
+        currentUser.uid ||
+        "Unknown";
+
+      await updateDoc(doc(db, INVOICE_COLLECTION, invoiceId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+        lastEditedBy: currentUser.uid,
+        lastEditedByName: updatedByName,
+        lastEditedAt: serverTimestamp(),
+      });
+
+      await logAudit({
+        action:           "invoice.edited",
+        userId:           currentUser.uid,
+        userName:         updatedByName,
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:     invoiceSnap.data().invoiceNo,
+          editedByName:  updatedByName,
+          fieldsUpdated: Object.keys(updates),
         },
       });
 

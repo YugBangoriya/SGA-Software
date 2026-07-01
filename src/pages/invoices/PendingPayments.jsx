@@ -1,3 +1,4 @@
+// SGA — Last updated: PAYMENT_METHOD_LABELS import added; legacy PARTIAL remapped to DEBIT in edit state init; backward compat for existing invoices
 // ============================================================
 // PendingPayments.jsx — Pending Payments Dashboard
 // Phase 4 — Shree Ganesh Automobile
@@ -18,6 +19,7 @@ import {
   formatCurrency,
   formatDate,
   PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
   derivePaymentStatus,
 } from "../../lib/invoiceHelpers";
 
@@ -67,10 +69,13 @@ export default function PendingPayments() {
   // ── Open update panel ───────────────────────────────
   const openEdit = (inv) => {
     setExpandedId(inv.id);
+    // Remap legacy "PARTIAL" value (pre-Debit rename) to "DEBIT" so the
+    // payment method button-group highlights correctly during editing.
+    const method = inv.paymentMethod === "PARTIAL" ? "DEBIT" : (inv.paymentMethod || "CASH");
     setEditState((prev) => ({
       ...prev,
       [inv.id]: {
-        paymentMethod: inv.paymentMethod || "CASH",
+        paymentMethod: method,
         amountPaid: inv.amountPaid ?? 0,
         loanProvider: inv.loanProvider || "",
         emiAmount: inv.emiAmount || "",

@@ -1,4 +1,4 @@
-// SGA — Last updated: Removed ROLES.EMPLOYEE from /inventory and /inventory/:itemId routes; employees redirected to /unauthorized if they attempt direct navigation (Request 3)
+// SGA — Last updated: Added /invoices/:id/edit route for Owner/SuperAdmin Edit Invoice feature
 // src/App.jsx — All modules wired to real components
 //
 // REQUEST 3 CHANGE:
@@ -40,6 +40,7 @@ import ItemDetailPage from "@/pages/inventory/ItemDetailPage";
 import InvoiceList     from "@/pages/invoices/InvoiceList";
 import CreateInvoice   from "@/pages/invoices/CreateInvoice";
 import InvoiceDetail   from "@/pages/invoices/InvoiceDetail";
+import EditInvoice     from "@/pages/invoices/EditInvoice";
 import PendingPayments from "@/pages/invoices/PendingPayments";
 import CreateReturnInvoice from "@/pages/invoices/CreateReturnInvoice";
 
@@ -168,6 +169,11 @@ export default function App() {
           <Route path="/invoices/pending-payments" element={
             <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
               <PendingPayments />
+            </ProtectedRoute>
+          } />
+          <Route path="/invoices/:id/edit" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <EditInvoice />
             </ProtectedRoute>
           } />
           <Route path="/invoices/:id" element={

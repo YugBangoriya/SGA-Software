@@ -1,4 +1,4 @@
-// SGA — Last updated: Added inline-editable customer name/phone for Unnamed Customer (Cash Memo) invoices; accepts onChange prop
+// SGA — Last updated: PAYMENT_METHOD_LABELS import added; methodLabel now falls back via PAYMENT_METHOD_LABELS for legacy PARTIAL invoices
 // ============================================================
 // InvoiceStepReview.jsx — Step 5: Review & Submit
 // Phase 4 — Shree Ganesh Automobile
@@ -6,7 +6,7 @@
 
 import { useState, useRef } from "react";
 import { User, Car, Package, Wrench, CreditCard, Calendar, CheckCircle, Pencil, Check, X, Receipt } from "lucide-react";
-import { formatCurrency, formatDate, PAYMENT_METHODS } from "../../lib/invoiceHelpers";
+import { formatCurrency, formatDate, PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "../../lib/invoiceHelpers";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
 
 // Default values for unnamed customer — must match InvoiceStepCustomer.jsx constants
@@ -30,7 +30,9 @@ export default function InvoiceStepReview({ data, onChange, darkMode }) {
   const amountPaid = parseFloat(data.amountPaid || 0);
   const balanceDue = Math.max(0, totalAmount - amountPaid);
   const paymentStatus = data.paymentStatus || "UNPAID";
-  const methodLabel = PAYMENT_METHODS.find((m) => m.value === data.paymentMethod)?.label || data.paymentMethod;
+  const methodLabel = PAYMENT_METHODS.find((m) => m.value === data.paymentMethod)?.label
+    || PAYMENT_METHOD_LABELS[data.paymentMethod]
+    || data.paymentMethod;
   const invoiceDate = data.invoiceDate
     ? new Date(data.invoiceDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : "—";
