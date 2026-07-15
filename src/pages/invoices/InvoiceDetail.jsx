@@ -1,4 +1,6 @@
-// SGA — Last updated: Added Edit button in header for Owner/SuperAdmin; navigates to /invoices/:id/edit
+// SGA — Last updated: Bug Fix — "Invoice not found" flash on first open. Added local loadDone state;
+// component now always shows a loading spinner until THIS mount's loadInvoice() resolves,
+// preventing any stale global-store error from showing before the fresh fetch completes.
 // ============================================================
 // InvoiceDetail.jsx — View, reprint, resend, approve invoice
 // Phase 4 — Shree Ganesh Automobile
@@ -44,6 +46,9 @@ export default function InvoiceDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [actionMsg, setActionMsg] = useState(justCreated ? "Invoice created successfully!" : null);
+  // FIX: Prevents stale global store error/invoice from flashing on first render.
+  // We always show a loading spinner until THIS mount's loadInvoice() has resolved.
+  const [loadDone, setLoadDone] = useState(false);
 
   const bg = isDark ? "#1A1A1A" : "#CDCBC9";
   const cardBg = isDark ? "#2A2A2A" : "#FFFFFF";
@@ -53,9 +58,14 @@ export default function InvoiceDetail() {
   const sectionBg = isDark ? "#1A1A1A" : "#F5F0EE";
 
   useEffect(() => {
+    setLoadDone(false);
     subscribeSystemConfig();
     loadSettings();
-    if (id) loadInvoice(id);
+    if (id) {
+      loadInvoice(id).finally(() => setLoadDone(true));
+    } else {
+      setLoadDone(true);
+    }
     if (justCreated) setTimeout(() => setActionMsg(null), 4000);
   }, [id]);
 
@@ -168,7 +178,9 @@ export default function InvoiceDetail() {
     </div>
   );
 
-  if (loading && !inv) {
+  // FIX: Show spinner until loadInvoice() for THIS mount has resolved.
+  // This prevents any stale global-store error from showing before the fetch completes.
+  if (!loadDone || (loading && !inv)) {
     return (
       <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ color: "#661F1F", fontSize: 16 }}>Loading invoice...</div>
@@ -178,8 +190,14 @@ export default function InvoiceDetail() {
 
   if (error && !inv) {
     return (
-      <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: "#CC0000", fontSize: 14 }}>{error}</div>
+      <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+        <div style={{ color: "#CC0000", fontSize: 14, fontFamily: "Arial, sans-serif" }}>{error}</div>
+        <button
+          onClick={() => { setLoadDone(false); loadInvoice(id).finally(() => setLoadDone(true)); }}
+          style={{ background: "#661F1F", color: "#FFF", border: "none", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontSize: 13 }}
+        >
+          Try Again
+        </button>
       </div>
     );
   }

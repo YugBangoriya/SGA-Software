@@ -1,4 +1,4 @@
-// SGA — Last updated: Added updateInvoice action for Owner/SuperAdmin edit-invoice feature
+// SGA — Last updated: loadInvoice now clears currentInvoice immediately on start, preventing stale "Invoice not found" flash on first open
 // createInvoice, approveInvoice, rejectInvoice, deleteInvoice, updatePaymentStatus,
 // logPdfDownload, logWhatsAppSent, createReturnInvoice, and approveReturnInvoice were
 // calling logAudit("action", id, collection, {metadata}) which silently passed a string
@@ -204,7 +204,9 @@ const useInvoiceStore = create((set, get) => ({
 
   // ── load single invoice ────────────────────────────────────
   loadInvoice: async (id) => {
-    set({ loading: true, error: null });
+    // Clear currentInvoice immediately so the UI doesn't flash stale data or
+    // a stale error while the new getDoc is in flight.
+    set({ loading: true, error: null, currentInvoice: null });
     try {
       const snap = await getDoc(doc(db, INVOICE_COLLECTION, id));
       if (snap.exists()) {

@@ -1,4 +1,4 @@
-// SGA — Last updated: Bug Fix #2 — Added Inventory Categories section to Settings Business tab (InventoryCategoriesSettings component added to owner sections)
+// SGA — Last updated: Bug Fix #2 — Added Inventory Categories section to Settings Business tab (InventoryCategoriesSettings component added to owner sections); Added AppUpdateCheck to My Account tab for manual software update checking
 // src/pages/settings/SettingsPage.jsx
 // Master Settings shell — role-based tab navigation, renders all settings panels.
 // SuperAdmin sees: SuperAdmin + Owner + User sections (god-mode).
@@ -49,6 +49,7 @@ import InventoryCategoriesSettings from "./InventoryCategoriesSettings";
 
 // User components
 import { ThemeToggle, LanguageToggle, ChangePassword } from "./UserPreferences";
+import AppUpdateCheck from "./AppUpdateCheck";
 
 // Shared UI
 import { T } from "./SettingsUI";
@@ -97,9 +98,10 @@ const ALL_TABS = [
     icon: "👤",
     roles: ["superadmin", "owner", "employee", "accountant"],
     sections: [
-      { id: "theme",    label: "Theme",           icon: "🌙", Component: ThemeToggle },
-      { id: "language", label: "Language",        icon: "🌐", Component: LanguageToggle },
-      { id: "password", label: "Change Password", icon: "🔑", Component: ChangePassword },
+      { id: "theme",    label: "Theme",             icon: "🌙", Component: ThemeToggle },
+      { id: "language", label: "Language",          icon: "🌐", Component: LanguageToggle },
+      { id: "password", label: "Change Password",   icon: "🔑", Component: ChangePassword },
+      { id: "update",   label: "Software Update",   icon: "🔄", Component: AppUpdateCheck },
     ],
   },
 ];

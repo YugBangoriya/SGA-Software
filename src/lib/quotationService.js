@@ -306,3 +306,37 @@ export async function searchCustomers(searchQuery) {
     )
     .slice(0, 10);
 }
+
+// ─── Update an existing quotation ────────────────────────────────────────────
+// Only edits the fields passed in `updates`. Resets pdfUrl to null so the
+// caller knows the PDF needs to be regenerated after saving.
+export async function updateQuotation(quotationId, updates, userId, userDisplayName) {
+  const ref  = doc(db, QUOTATIONS_COLLECTION, quotationId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Quotation not found.");
+
+  const payload = {
+    ...updates,
+    pdfUrl:    null,           // PDF is stale after any edit — force regeneration
+    status:    "draft",        // Reset back to draft
+    updatedAt: serverTimestamp(),
+    lastEditedBy:     userId,
+    lastEditedByName: userDisplayName,
+    lastEditedAt:     serverTimestamp(),
+  };
+
+  await updateDoc(ref, payload);
+
+  await logAudit({
+    action:           "quotation.edited",
+    userId,
+    userName:         userDisplayName,
+    targetId:         quotationId,
+    targetCollection: QUOTATIONS_COLLECTION,
+    metadata: {
+      quotationNumber: snap.data().quotationNumber,
+      editedByName:    userDisplayName,
+      fieldsUpdated:   Object.keys(updates),
+    },
+  });
+}

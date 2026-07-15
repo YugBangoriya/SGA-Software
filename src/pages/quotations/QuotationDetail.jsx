@@ -1,13 +1,8 @@
-// SGA — Last updated: Bug Fix — Logo pre-fetch for quotation PDFs.
-// Added fetchImageAsBase64() helper; both handleGeneratePdf() and
-// handleSendWhatsApp() now call enrichBizSettingsWithLogo() before
-// passing businessSettings to QuotationPDFDocument so the logo renders
-// correctly instead of showing a blank box.
-// Prior fixes retained: Feature 3 — standardized formatDate(); null-safe
-// load guard; currentUser.uid fix.
+// SGA — Last updated: Added Edit Quotation button in header (Owner/SuperAdmin only).
+// Navigates to /quotations/:id/edit. Shows "Updated" banner when returning from edit.
+// Prior fix retained: Logo pre-fetch for PDFs (fetchImageAsBase64 / enrichBizSettingsWithLogo).
 //
 // src/pages/quotations/QuotationDetail.jsx
-// Phase 5 — Quotation Module
 
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
@@ -15,7 +10,7 @@ import { pdf } from "@react-pdf/renderer";
 import {
   ArrowLeft, Download, Send, Loader2, CheckCircle,
   AlertTriangle, ExternalLink, RefreshCcw, Car, User,
-  FileText, Calendar, Hash, Phone
+  FileText, Calendar, Hash, Phone, Pencil
 } from "lucide-react";
 import { QuotationPDFDocument } from "./QuotationPDF";
 import {
@@ -120,16 +115,18 @@ export default function QuotationDetail() {
   const location = useLocation();
 
   // FIX: useAuth() returns { uid, displayName, role, ... } — use uid directly.
-  const { uid: currentUserUid } = useAuth();
+  const { uid: currentUserUid, isOwnerOrAbove } = useAuth();
 
   // Try to use data passed from create form (avoids a Firestore fetch)
   const passedQuotation    = location.state?.quotation    || null;
   const passedBizSettings  = location.state?.bizSettings  || null;
   const isNewlyCreated     = location.state?.newlyCreated || false;
+  const isJustUpdated      = location.state?.updated      || false;
 
   const [quotation,    setQuotation]    = useState(passedQuotation);
   const [bizSettings,  setBizSettings]  = useState(passedBizSettings);
-  const [isLoading,    setIsLoading]    = useState(!passedQuotation);
+  // After returning from edit, always re-fetch so we have fresh data
+  const [isLoading,    setIsLoading]    = useState(!passedQuotation || isJustUpdated);
   const [loadError,    setLoadError]    = useState(null);
 
   // Action states
@@ -139,17 +136,22 @@ export default function QuotationDetail() {
   const [localPdfUrl,       setLocalPdfUrl]       = useState(null);
   const [actionSuccess,     setActionSuccess]     = useState(null);
   const [actionError,       setActionError]       = useState(null);
-  const [showSuccessBanner, setShowSuccessBanner] = useState(isNewlyCreated);
+  const [showSuccessBanner, setShowSuccessBanner] = useState(isNewlyCreated || isJustUpdated);
+  const [successBannerMsg,  setSuccessBannerMsg]  = useState(
+    isJustUpdated
+      ? "Quotation updated successfully! Regenerate the PDF to reflect the changes."
+      : "Quotation created successfully! Generate a PDF and send it to the customer via WhatsApp below."
+  );
 
   // ─── Load data ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!quotation || !bizSettings) {
+    if (!quotation || !bizSettings || isJustUpdated) {
       (async () => {
         setIsLoading(true);
         try {
           const [q, s] = await Promise.all([
-            quotation ? Promise.resolve(quotation) : fetchQuotationById(id),
-            bizSettings ? Promise.resolve(bizSettings) : fetchBusinessSettings(),
+            fetchQuotationById(id),
+            bizSettings && !isJustUpdated ? Promise.resolve(bizSettings) : fetchBusinessSettings(),
           ]);
           setQuotation(q);
           setBizSettings(s);
@@ -320,18 +322,31 @@ export default function QuotationDetail() {
             </h1>
           </div>
           <StatusBadge status={quotation.status} />
+          {/* Edit button — Owner / SuperAdmin only */}
+          {isOwnerOrAbove && (
+            <button
+              onClick={() => navigate(`/quotations/${id}/edit`)}
+              className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-white hover:bg-white/25 transition-colors ml-1"
+              title="Edit Quotation"
+              aria-label="Edit Quotation"
+            >
+              <Pencil size={16} />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 pt-6 flex flex-col gap-5">
 
-        {/* ── New creation success banner ── */}
+        {/* ── New creation / update success banner ── */}
         {showSuccessBanner && (
           <div className="bg-[#E8F5E9] border border-[#B8E0B8] rounded-xl px-4 py-3 flex items-center gap-3">
             <CheckCircle size={18} className="text-[#1A7A1A] flex-shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-[#1A7A1A] font-sans">Quotation created successfully!</p>
-              <p className="text-xs text-[#4A8A4A] font-sans">Generate a PDF and send it to the customer via WhatsApp below.</p>
+              <p className="text-sm font-semibold text-[#1A7A1A] font-sans">
+                {isJustUpdated ? "Quotation updated!" : "Quotation created successfully!"}
+              </p>
+              <p className="text-xs text-[#4A8A4A] font-sans">{successBannerMsg}</p>
             </div>
           </div>
         )}

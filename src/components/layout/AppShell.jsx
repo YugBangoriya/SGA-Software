@@ -1,3 +1,4 @@
+// SGA — Last updated: Added AppUpdateBanner to detect and display new PWA version notifications
 // ─────────────────────────────────────────────────────────────────────────────
 // src/components/layout/AppShell.jsx
 // Authenticated layout wrapper.
@@ -9,6 +10,7 @@ import { useState } from "react";
 import Sidebar  from "./Sidebar";
 import BottomNav from "./BottomNav";
 import TopBar   from "./TopBar";
+import AppUpdateBanner from "./AppUpdateBanner";
 
 export default function AppShell({ children, pageTitle }) {
   return (
@@ -16,6 +18,9 @@ export default function AppShell({ children, pageTitle }) {
       className="min-h-screen"
       style={{ background: "var(--bg-app)" }}
     >
+      {/* Update available banner — shown above everything when a new SW activates */}
+      <AppUpdateBanner />
+
       {/* Desktop sidebar — fixed left */}
       <Sidebar />
 
