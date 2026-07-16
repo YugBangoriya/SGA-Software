@@ -1,4 +1,4 @@
-// SGA — Last updated: Removed standalone BarChart2 icon box from header — inconsistent UI
+// SGA — Last updated: Added Sales Report card to reporting hub
 //   (no other page has a standalone icon box in its page header next to the Home button)
 /**
  * ReportingHub.jsx
@@ -16,7 +16,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   FileText, TrendingUp, AlertCircle, Users, MessageCircle,
-  Shield, ChevronRight,
+  Shield, ChevronRight, ShoppingCart,
 } from 'lucide-react';
 import useAuthStore from '@/store/authStore';
 import HomeButton from '../../components/ui/HomeButton';
@@ -43,6 +43,17 @@ const REPORTS = [
     border: '#B8E0B8',
     roles: ['owner', 'superadmin'],
     path: '/reports/profit-loss',         // ← was /reporting/profit-loss
+  },
+  {
+    id: 'sales-report',
+    title: 'Sales Report',
+    description: 'Monthly invoice breakdown and item stock movement. Export as PDF or CSV.',
+    icon: ShoppingCart,
+    accent: '#0055CC',
+    bg: '#EEF3FF',
+    border: '#B3D0F5',
+    roles: ['owner', 'superadmin'],
+    path: '/reports/sales',
   },
   {
     id: 'pending-invoices',

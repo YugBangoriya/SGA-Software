@@ -68,6 +68,7 @@ import ProfitLossReport            from "@/pages/reporting/ProfitLossReport";
 import PendingInvoicesSummary      from "@/pages/reporting/PendingInvoicesSummary";
 import CustomerAcquisitionPipeline from "@/pages/reporting/CustomerAcquisitionPipeline";
 import FollowUpTracker             from "@/pages/reporting/FollowUpTracker";
+import SalesReport                 from "@/pages/reporting/SalesReport";
 
 // ── Phase 11: Settings
 import { SettingsPage } from "@/pages/settings/index";
@@ -256,6 +257,11 @@ export default function App() {
           <Route path="/reports/follow-ups" element={
             <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
               <FollowUpTracker />
+            </ProtectedRoute>
+          } />
+          <Route path="/reports/sales" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <SalesReport />
             </ProtectedRoute>
           } />
 

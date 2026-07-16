@@ -1,4 +1,4 @@
-// SGA — Last updated: Partial-payment invoices now get a distinct teal-blue left-border highlight (different from return invoice rose highlight); InvoiceCard receives isPendingPayment flag via SelectableInvoiceCard wrapper
+// SGA — Last updated: Bug fix — remove redundant outer onClick from SelectableInvoiceCard causing [object Object] URL navigation
 // ============================================================
 // InvoiceList.jsx — Invoice list + Pending Approvals section
 // Phase 4 — Shree Ganesh Automobile
@@ -170,7 +170,6 @@ function SelectableInvoiceCard({ invoice, onClick, darkMode, selectMode, selecte
         </div>
       )}
       <div
-        onClick={onClick}
         style={{ paddingLeft: selectMode ? 0 : 0, opacity: selectMode && !selected ? 0.75 : 1, transition: "opacity 0.15s" }}
       >
         <InvoiceCard
