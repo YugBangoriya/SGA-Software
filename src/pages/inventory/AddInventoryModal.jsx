@@ -1,4 +1,4 @@
-// SGA — Last updated: Added optional Invoice/Order Reference (invoiceRef) field in Receipt Details section
+// SGA — Last updated: Added shortcut uniqueness validation — duplicate shortcuts are flagged at submit time with the conflicting item name shown in the error message
 /**
  * AddInventoryModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add a brand-new inventory item.
@@ -40,7 +40,10 @@ const inputStyle = (hasError = false, extraStyle = {}) => ({
 });
 
 export default function AddInventoryModal({ categories: _propCategories, user, onClose, onSuccess }) {
-  const { addItem, categories, categoriesLoading, fetchCategories } = useInventoryStore();
+  // `items` is used for shortcut uniqueness validation.
+  // The InventoryPage always loads items before mounting this modal so the
+  // list is already populated here under normal usage.
+  const { addItem, categories, categoriesLoading, fetchCategories, items } = useInventoryStore();
   const today = todayISO();
   const [isUntracked, setIsUntracked] = useState(false);
 
@@ -95,6 +98,20 @@ export default function AddInventoryModal({ categories: _propCategories, user, o
     if (form.sellingPrice !== '' && (isNaN(form.sellingPrice) || Number(form.sellingPrice) < 0))
       errs.sellingPrice = 'Enter a valid selling price (or leave blank)';
     if (!form.dateOrderedOrReceived) errs.dateOrderedOrReceived = 'Date is required';
+
+    // ── Shortcut uniqueness check ──────────────────────────────────────
+    // Two items cannot share the same shortcut — the exact-match pin in
+    // InvoiceStepItems only works reliably when shortcuts are unique.
+    const trimmedShortcut = form.shortcut.trim();
+    if (trimmedShortcut) {
+      const duplicate = items.find(
+        (i) => i.shortcut && i.shortcut.toLowerCase() === trimmedShortcut.toLowerCase()
+      );
+      if (duplicate) {
+        errs.shortcut = `Shortcut "${trimmedShortcut}" is already used by "${duplicate.itemName}". Each shortcut must be unique.`;
+      }
+    }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };

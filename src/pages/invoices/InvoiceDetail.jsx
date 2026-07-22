@@ -1,6 +1,4 @@
-// SGA — Last updated: Bug Fix — "Invoice not found" flash on first open. Added local loadDone state;
-// component now always shows a loading spinner until THIS mount's loadInvoice() resolves,
-// preventing any stale global-store error from showing before the fresh fetch completes.
+// SGA — Last updated: Smart Edit button — PENDING invoices route to /edit-items (EditPendingInvoice, full item editing) while APPROVED invoices route to /edit (EditInvoice, payment/date only). Edit-Items button also added inside the PENDING approval card for discoverability.
 // ============================================================
 // InvoiceDetail.jsx — View, reprint, resend, approve invoice
 // Phase 4 — Shree Ganesh Automobile
@@ -233,9 +231,16 @@ export default function InvoiceDetail() {
         </div>
         {isOwnerOrAbove && inv && (
           <button
-            onClick={() => navigate(`/invoices/${id}/edit`)}
+            onClick={() =>
+              // PENDING invoices → edit-items (full item/labour/payment edit before approval)
+              // Approved/other invoices → edit (payment-only edit, preserves inventory deduction)
+              navigate(inv.status === "PENDING"
+                ? `/invoices/${id}/edit-items`
+                : `/invoices/${id}/edit`
+              )
+            }
             style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FFFFFF", display: "flex" }}
-            title="Edit invoice"
+            title={inv.status === "PENDING" ? "Edit invoice items before approving" : "Edit payment / date details"}
           >
             <Edit size={16} />
           </button>
@@ -289,9 +294,24 @@ export default function InvoiceDetail() {
                     Awaiting Your Approval
                   </span>
                 </div>
-                <p style={{ fontSize: 12, color: textSecondary, margin: "0 0 12px" }}>
-                  Approving will deduct the selected items from live inventory.
+                <p style={{ fontSize: 12, color: textSecondary, margin: "0 0 10px" }}>
+                  Review the items below before approving. Approving will deduct the selected items from live inventory.
                 </p>
+                {/* Edit Items — visible for owner/superadmin before approval */}
+                <button
+                  onClick={() => navigate(`/invoices/${id}/edit-items`)}
+                  style={{
+                    width: "100%", padding: "9px 0", marginBottom: 10,
+                    background: "none", border: "1.5px solid #CC6600",
+                    borderRadius: 8, color: "#CC6600", fontWeight: 700,
+                    fontSize: 13, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    gap: 5, fontFamily: "inherit",
+                  }}
+                >
+                  <Edit size={14} />
+                  Edit Items / Labour / Payment
+                </button>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={handleApprove}

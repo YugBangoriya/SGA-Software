@@ -1,4 +1,4 @@
-// SGA — Last updated: Extended item search to include shortcut/alias field for fast lookup during invoice creation
+// SGA — Last updated: Shortcut uniqueness enforcement — exact shortcut match is pinned to top of picker list; all other results shown below. Shortcut badge highlights pinned item.
 // ============================================================
 // InvoiceStepItems.jsx — Step 2: Line Items from Inventory
 // Phase 4 — Shree Ganesh Automobile
@@ -69,16 +69,35 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
     load();
   }, []);
 
-  const filteredInventory = inventory.filter((item) => {
+  // ── Filtered + sorted inventory ──────────────────────────
+  // When the search term EXACTLY matches a shortcut (case-insensitive) that
+  // item is pinned to the very top of the list.  All other matching items
+  // (by name, category, or partial shortcut) follow below.
+  // This lets employees type a shortcut like "ms" and immediately see the
+  // correct item first without ambiguity, while still seeing the full
+  // filtered list for context.
+  const filteredInventory = (() => {
     const q = search.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      item.itemName?.toLowerCase().includes(q) ||
-      item.category?.toLowerCase().includes(q) ||
-      // NEW — search by shortcut/alias so typing e.g. "ms" finds "M.S. Connector"
-      (item.shortcut && item.shortcut.toLowerCase().includes(q))
+    if (!q) return inventory;
+
+    // Find the item whose shortcut is an EXACT match
+    const exactShortcutMatch = inventory.find(
+      (item) => item.shortcut && item.shortcut.toLowerCase() === q
     );
-  });
+
+    // All other items that match by name, category, or partial shortcut
+    const others = inventory.filter((item) => {
+      // Already handled as the pinned top item
+      if (exactShortcutMatch && item.id === exactShortcutMatch.id) return false;
+      return (
+        item.itemName?.toLowerCase().includes(q) ||
+        item.category?.toLowerCase().includes(q) ||
+        (item.shortcut && item.shortcut.toLowerCase().includes(q))
+      );
+    });
+
+    return exactShortcutMatch ? [exactShortcutMatch, ...others] : others;
+  })();
 
   // ── Effective price for an inventory item ─────────────────
   // Priority: sellingPrice (if set and > 0) → 0 (NOT purchase price)
@@ -536,7 +555,7 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
                 <Search size={15} color="#888" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
                 <input
                   autoFocus
-                  placeholder="Search items..."
+                  placeholder="Search by name, category or type a shortcut…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{
@@ -682,77 +701,121 @@ export default function InvoiceStepItems({ data, onChange, darkMode }) {
               ) : filteredInventory.length === 0 ? (
                 <div style={{ textAlign: "center", padding: 30, color: textSecondary }}>No items found.</div>
               ) : (
-                filteredInventory.map((item) => {
-                  const isUntracked = item.isUntracked === true;
-            const outOfStock = !isUntracked && (item.quantity || 0) === 0;
-                  const alreadyAdded = items.find((i) => i.inventoryItemId === item.id);
-                  const effectivePrice = getEffectivePrice(item);
-                  const hasSellingPrice = item.sellingPrice != null && item.sellingPrice > 0;
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => !outOfStock && addItem(item)}
-                      style={{
-                        padding: "11px 12px",
-                        borderRadius: 8,
-                        marginBottom: 6,
-                        border: `1px solid ${alreadyAdded ? "#4CAF50" : border}`,
-                        background: alreadyAdded ? "#F0FAF0" : outOfStock ? (isDark ? "#2A1A1A" : "#FFF5F5") : bg,
-                        cursor: outOfStock ? "not-allowed" : "pointer",
-                        display: "flex", alignItems: "center", gap: 10,
-                        opacity: outOfStock ? 0.6 : 1,
-                        transition: "all 0.12s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!outOfStock) e.currentTarget.style.borderColor = "#661F1F";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = alreadyAdded ? "#4CAF50" : border;
-                      }}
-                    >
-                      <Package size={16} color={outOfStock ? "#CC0000" : "#661F1F"} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>
-                          {item.itemName}
-                          {alreadyAdded && (
-                            <span style={{ marginLeft: 8, fontSize: 10, color: "#1A7A1A", fontWeight: 600 }}>
-                              ✓ Added
-                            </span>
-                          )}
-                          {/* NEW — show shortcut badge in picker */}
-                          {item.shortcut && (
-                            <span style={{ marginLeft: 6, fontSize: 10, background: '#E3F2FD', color: '#0055CC', padding: '1px 6px', borderRadius: 3, fontWeight: 600, fontFamily: "'Courier New', monospace", letterSpacing: 0.5 }}>
-                              {item.shortcut}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: textSecondary, marginTop: 1 }}>
-                          {item.category && <span>{item.category} · </span>}
-                          {isUntracked ? "Untracked — no limit" : `Stock: ${item.quantity || 0}`}
-                          {outOfStock && <span style={{ color: "#CC0000", fontWeight: 600 }}> (Out of stock)</span>}
+                (() => {
+                  // Determine which item (if any) is pinned by an exact shortcut match
+                  const q = search.toLowerCase().trim();
+                  const pinnedId = q
+                    ? (inventory.find(
+                        (i) => i.shortcut && i.shortcut.toLowerCase() === q
+                      )?.id || null)
+                    : null;
+
+                  return filteredInventory.map((item, listIdx) => {
+                    const isUntracked  = item.isUntracked === true;
+                    const outOfStock   = !isUntracked && (item.quantity || 0) === 0;
+                    const alreadyAdded = items.find((i) => i.inventoryItemId === item.id);
+                    const effectivePrice = getEffectivePrice(item);
+                    const hasSellingPrice = item.sellingPrice != null && item.sellingPrice > 0;
+                    // This item is pinned because its shortcut exactly matched the query
+                    const isPinned = pinnedId && item.id === pinnedId;
+
+                    return (
+                      <div key={item.id}>
+                        {/* Divider between pinned item and rest of results */}
+                        {isPinned && filteredInventory.length > 1 && (
+                          <div style={{ fontSize: 10, color: "#0055CC", fontWeight: 700, fontFamily: "'Courier New', monospace", letterSpacing: 0.5, marginBottom: 4, paddingLeft: 2 }}>
+                            ↑ SHORTCUT MATCH
+                          </div>
+                        )}
+                        {!isPinned && pinnedId && listIdx === 1 && filteredInventory.length > 1 && (
+                          <div style={{ fontSize: 10, color: textSecondary, fontFamily: "Arial, sans-serif", letterSpacing: 0.3, margin: "6px 0 4px 2px", borderTop: `1px solid ${border}`, paddingTop: 8 }}>
+                            Other results
+                          </div>
+                        )}
+                        <div
+                          onClick={() => !outOfStock && addItem(item)}
+                          style={{
+                            padding: "11px 12px",
+                            borderRadius: 8,
+                            marginBottom: 6,
+                            border: `${isPinned ? "2px" : "1px"} solid ${
+                              alreadyAdded ? "#4CAF50" : isPinned ? "#0055CC" : border
+                            }`,
+                            background: alreadyAdded
+                              ? "#F0FAF0"
+                              : isPinned
+                              ? (isDark ? "#0D1E2E" : "#EFF6FF")
+                              : outOfStock
+                              ? (isDark ? "#2A1A1A" : "#FFF5F5")
+                              : bg,
+                            cursor: outOfStock ? "not-allowed" : "pointer",
+                            display: "flex", alignItems: "center", gap: 10,
+                            opacity: outOfStock ? 0.6 : 1,
+                            transition: "all 0.12s",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!outOfStock) e.currentTarget.style.borderColor = isPinned ? "#0044AA" : "#661F1F";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = alreadyAdded
+                              ? "#4CAF50"
+                              : isPinned
+                              ? "#0055CC"
+                              : border;
+                          }}
+                        >
+                          <Package size={16} color={outOfStock ? "#CC0000" : isPinned ? "#0055CC" : "#661F1F"} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>
+                              {item.itemName}
+                              {alreadyAdded && (
+                                <span style={{ marginLeft: 8, fontSize: 10, color: "#1A7A1A", fontWeight: 600 }}>
+                                  ✓ Added
+                                </span>
+                              )}
+                              {/* Shortcut badge — highlighted in blue when this is the pinned match */}
+                              {item.shortcut && (
+                                <span style={{
+                                  marginLeft: 6, fontSize: 10,
+                                  background: isPinned ? "#0055CC" : "#E3F2FD",
+                                  color: isPinned ? "#FFFFFF" : "#0055CC",
+                                  padding: "1px 6px", borderRadius: 3,
+                                  fontWeight: 600, fontFamily: "'Courier New', monospace",
+                                  letterSpacing: 0.5,
+                                }}>
+                                  {item.shortcut}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: textSecondary, marginTop: 1 }}>
+                              {item.category && <span>{item.category} · </span>}
+                              {isUntracked ? "Untracked — no limit" : `Stock: ${item.quantity || 0}`}
+                              {outOfStock && <span style={{ color: "#CC0000", fontWeight: 600 }}> (Out of stock)</span>}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{
+                              fontSize: 13, fontWeight: 700,
+                              color: hasSellingPrice ? "#661F1F" : "#CC6600",
+                              fontFamily: "'Courier New', monospace",
+                            }}>
+                              {hasSellingPrice ? formatCurrency(effectivePrice) : "₹0.00"}
+                            </div>
+                            <div style={{
+                              fontSize: 9,
+                              background: hasSellingPrice ? "#E8F5E9" : "#FFF3E0",
+                              color: hasSellingPrice ? "#1A7A1A" : "#CC6600",
+                              borderRadius: 3, padding: "1px 5px",
+                              fontWeight: 700, display: "inline-block", marginTop: 2,
+                            }}>
+                              {hasSellingPrice ? "SELL" : "₹0"}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700,
-                          color: hasSellingPrice ? "#661F1F" : "#CC6600",
-                          fontFamily: "'Courier New', monospace",
-                        }}>
-                          {hasSellingPrice ? formatCurrency(effectivePrice) : "₹0.00"}
-                        </div>
-                        <div style={{
-                          fontSize: 9,
-                          background: hasSellingPrice ? "#E8F5E9" : "#FFF3E0",
-                          color: hasSellingPrice ? "#1A7A1A" : "#CC6600",
-                          borderRadius: 3, padding: "1px 5px",
-                          fontWeight: 700, display: "inline-block", marginTop: 2,
-                        }}>
-                          {hasSellingPrice ? "SELL" : "₹0"}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  });
+                })()
               )}
             </div>
           </div>

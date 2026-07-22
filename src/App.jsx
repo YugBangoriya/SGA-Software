@@ -1,4 +1,4 @@
-// SGA — Last updated: Added /invoices/:id/edit route for Owner/SuperAdmin Edit Invoice feature
+// SGA — Last updated: Added /invoices/:id/edit-items route for Owner/SuperAdmin to edit items on PENDING invoices before approval (EditPendingInvoice); smart Edit button in InvoiceDetail routes to this page when invoice is PENDING
 // src/App.jsx — All modules wired to real components
 //
 // REQUEST 3 CHANGE:
@@ -37,12 +37,13 @@ import InventoryPage  from "@/pages/inventory/index";
 import ItemDetailPage from "@/pages/inventory/ItemDetailPage";
 
 // ── Phase 4: Invoices
-import InvoiceList     from "@/pages/invoices/InvoiceList";
-import CreateInvoice   from "@/pages/invoices/CreateInvoice";
-import InvoiceDetail   from "@/pages/invoices/InvoiceDetail";
-import EditInvoice     from "@/pages/invoices/EditInvoice";
-import PendingPayments from "@/pages/invoices/PendingPayments";
-import CreateReturnInvoice from "@/pages/invoices/CreateReturnInvoice";
+import InvoiceList          from "@/pages/invoices/InvoiceList";
+import CreateInvoice        from "@/pages/invoices/CreateInvoice";
+import InvoiceDetail        from "@/pages/invoices/InvoiceDetail";
+import EditInvoice          from "@/pages/invoices/EditInvoice";
+import EditPendingInvoice   from "@/pages/invoices/EditPendingInvoice";
+import PendingPayments      from "@/pages/invoices/PendingPayments";
+import CreateReturnInvoice  from "@/pages/invoices/CreateReturnInvoice";
 
 // ── Phase 5: Quotations
 import QuotationsPage from "@/pages/quotations/QuotationsPage";
@@ -175,6 +176,12 @@ export default function App() {
           <Route path="/invoices/:id/edit" element={
             <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
               <EditInvoice />
+            </ProtectedRoute>
+          } />
+          {/* Edit items on PENDING invoices only — full edit before approval */}
+          <Route path="/invoices/:id/edit-items" element={
+            <ProtectedRoute allowedRoles={[ROLES.SUPERADMIN, ROLES.OWNER]}>
+              <EditPendingInvoice />
             </ProtectedRoute>
           } />
           <Route path="/invoices/:id" element={

@@ -1,4 +1,4 @@
-// SGA — Last updated: Added restock history entry editing (qty, price, date, vendor, invoiceRef), inline editors for category/vendor/lastRestockedDate, invoiceRef column in history table
+// SGA — Last updated: Added shortcut uniqueness check in ShortcutEditor — rejects duplicate shortcuts with the conflicting item name shown in the error. Restock entry editing also present.
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
@@ -149,14 +149,34 @@ function EntryTypeBadge({ type }) {
 // ─── Inline Shortcut / Alias Editor ───────────────────────────────────────────
 
 function ShortcutEditor({ itemId, currentShortcut, user, onSaved }) {
-  const { updateItem } = useInventoryStore();
+  // `items` is needed to check shortcut uniqueness across ALL inventory items.
+  // We exclude the current item (itemId) so an owner can re-save the same
+  // shortcut without a false duplicate error.
+  const { updateItem, items } = useInventoryStore();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(currentShortcut || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
   const handleSave = async () => {
+    const trimmedValue = value.trim();
+
+    // ── Shortcut uniqueness check (exclude this item) ────────────────────
+    if (trimmedValue) {
+      const duplicate = items.find(
+        (i) =>
+          i.id !== itemId &&
+          i.shortcut &&
+          i.shortcut.toLowerCase() === trimmedValue.toLowerCase()
+      );
+      if (duplicate) {
+        setError(`Shortcut "${trimmedValue}" is already used by "${duplicate.itemName}". Each shortcut must be unique.`);
+        return;
+      }
+    }
+
     setLoading(true); setError('');
-    try { await updateItem(itemId, { shortcut: value.trim() }, user); setEditing(false); onSaved?.(); }
+    try { await updateItem(itemId, { shortcut: trimmedValue }, user); setEditing(false); onSaved?.(); }
     catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };
