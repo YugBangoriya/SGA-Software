@@ -1,10 +1,4 @@
-// SGA — Last updated: loadInvoice now clears currentInvoice immediately on start, preventing stale "Invoice not found" flash on first open
-// createInvoice, approveInvoice, rejectInvoice, deleteInvoice, updatePaymentStatus,
-// logPdfDownload, logWhatsAppSent, createReturnInvoice, and approveReturnInvoice were
-// calling logAudit("action", id, collection, {metadata}) which silently passed a string
-// as the destructured parameter object, so action/userId/userName were all recorded as
-// undefined. All 9 calls converted to the correct object form: logAudit({ action, userId, ... }).
-// AUDIT_ACTIONS import added alongside existing logAudit import.
+// SGA — Last updated: Multi-method payment support — createInvoice now initialises paymentEntries[] and totalPaid; added addPaymentEntry and deletePaymentEntry actions; existing actions and signatures unchanged for backward compatibility
 // ============================================================
 // invoiceStore.js — Zustand store for Invoice Module
 // Phase 4 — Shree Ganesh Automobile
@@ -26,10 +20,13 @@ import {
   serverTimestamp,
   increment,
   writeBatch,
+  arrayUnion,
+  arrayRemove,
   limit,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { logAudit, AUDIT_ACTIONS } from '../lib/auditService';
+import { derivePaymentStatus, computeTotalPaid } from '../lib/invoiceHelpers';
 
 // ── helpers ─────────────────────────────────────────────────
 const INVOICE_COLLECTION = "invoices";
@@ -46,11 +43,6 @@ function getTodayDDMMYYYY() {
   return `${dd}-${mm}-${yyyy}`;
 }
 
-// ── Date helper: converts a "YYYY-MM-DD" date string (as produced by
-// <input type="date">) to "DD-MM-YYYY". Falls back to today's date if
-// the value is missing or not in the expected format. Used so invoice
-// numbering is based on the invoice's own (possibly back-dated) date,
-// not the date the record was created. ──────────────────────────────
 function toDDMMYYYY(dateStr) {
   if (typeof dateStr === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     const [yyyy, mm, dd] = dateStr.split("-");
@@ -60,13 +52,10 @@ function toDDMMYYYY(dateStr) {
 }
 
 // Generate sequential invoice number: INV-DD-MM-YYYY-XXX
-// Date used is the invoice's own (possibly back-dated/overridden) invoiceDate,
-// NOT the date the record is created. Serial number resets per that date.
 async function generateInvoiceNumber(invoiceDateStr) {
-  const dateStr = toDDMMYYYY(invoiceDateStr); // e.g. "02-04-2026"
+  const dateStr = toDDMMYYYY(invoiceDateStr);
   const prefix  = `INV-${dateStr}-`;
 
-  // Query all invoices to find those from today with our prefix
   const q = query(
     collection(db, INVOICE_COLLECTION),
     orderBy("createdAt", "desc"),
@@ -112,9 +101,7 @@ async function generateReturnInvoiceNumber(returnDateStr) {
   return `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
 }
 
-// ── Payment statuses that mean "fully settled" ─────────────
-// An invoice is eligible for export+delete if its payment is complete.
-// Invoices with these statuses are EXCLUDED from bulk delete (still pending money).
+// Payment statuses that mean "still owes money"
 const PENDING_PAYMENT_STATUSES = ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"];
 
 // ── store ────────────────────────────────────────────────────
@@ -204,8 +191,6 @@ const useInvoiceStore = create((set, get) => ({
 
   // ── load single invoice ────────────────────────────────────
   loadInvoice: async (id) => {
-    // Clear currentInvoice immediately so the UI doesn't flash stale data or
-    // a stale error while the new getDoc is in flight.
     set({ loading: true, error: null, currentInvoice: null });
     try {
       const snap = await getDoc(doc(db, INVOICE_COLLECTION, id));
@@ -220,6 +205,8 @@ const useInvoiceStore = create((set, get) => ({
   },
 
   // ── create invoice ─────────────────────────────────────────
+  // invoiceData is expected to include paymentEntries[] and totalPaid
+  // (built by CreateInvoice.jsx before calling this action).
   createInvoice: async (invoiceData, currentUser) => {
     const { dbLocked } = get();
     if (dbLocked) throw new Error("Invoice database is currently locked.");
@@ -233,8 +220,23 @@ const useInvoiceStore = create((set, get) => ({
         currentUser.email ||
         currentUser.uid ||
         "Unknown";
+
+      // Ensure paymentEntries and totalPaid are always present in the document.
+      // CreateInvoice.jsx is responsible for building these from the wizard form.
+      // This guard ensures legacy callers that don't pass these fields still get
+      // sensible defaults rather than undefined fields in Firestore.
+      const paymentEntries = Array.isArray(invoiceData.paymentEntries)
+        ? invoiceData.paymentEntries
+        : [];
+      const totalPaid =
+        invoiceData.totalPaid != null
+          ? invoiceData.totalPaid
+          : parseFloat(invoiceData.amountPaid || 0);
+
       const payload = {
         ...invoiceData,
+        paymentEntries,
+        totalPaid,
         invoiceNo,
         status: "PENDING",
         createdBy: currentUser.uid,
@@ -247,7 +249,6 @@ const useInvoiceStore = create((set, get) => ({
 
       const ref = await addDoc(collection(db, INVOICE_COLLECTION), payload);
 
-      // FIX: was logAudit("invoice_created", ref.id, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           AUDIT_ACTIONS.INVOICE_CREATED,
         userId:           currentUser.uid,
@@ -307,7 +308,6 @@ const useInvoiceStore = create((set, get) => ({
 
       await batch.commit();
 
-      // FIX: was logAudit("invoice_approved", invoiceId, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           AUDIT_ACTIONS.INVOICE_APPROVED,
         userId:           currentUser.uid,
@@ -338,7 +338,6 @@ const useInvoiceStore = create((set, get) => ({
       if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
       const invoice = invoiceSnap.data();
 
-      // FIX: was logAudit("invoice_rejected", invoiceId, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           "invoice.rejected",
         userId:           currentUser.uid,
@@ -366,7 +365,6 @@ const useInvoiceStore = create((set, get) => ({
     try {
       const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
       if (invoiceSnap.exists()) {
-        // FIX: was logAudit("invoice_deleted", invoiceId, INVOICE_COLLECTION, {...})
         await logAudit({
           action:           AUDIT_ACTIONS.INVOICE_DELETED,
           userId:           currentUser.uid,
@@ -387,7 +385,9 @@ const useInvoiceStore = create((set, get) => ({
     }
   },
 
-  // ── update payment status ──────────────────────────────────
+  // ── update payment status (legacy — kept for backward compat) ──
+  // New code should prefer addPaymentEntry. This action remains valid for
+  // bulk status corrections that don't require a new entry.
   updatePaymentStatus: async (invoiceId, updates, currentUser) => {
     if (!currentUser) throw new Error("Authentication error. Please log out and log in again.");
     set({ loading: true, error: null });
@@ -403,7 +403,6 @@ const useInvoiceStore = create((set, get) => ({
         currentUser.uid ||
         "Unknown";
 
-      // FIX: was logAudit("invoice_status_updated", invoiceId, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           "invoice.payment_status_updated",
         userId:           currentUser.uid,
@@ -423,9 +422,182 @@ const useInvoiceStore = create((set, get) => ({
     }
   },
 
+  // ── addPaymentEntry ─────────────────────────────────────────
+  // Appends a new payment entry to an invoice's paymentEntries[] array,
+  // recomputes totalPaid, and re-derives paymentStatus atomically.
+  //
+  // entry shape: { id, amount, method, date, reference, recordedBy, recordedByName }
+  // Built by buildPaymentEntry() in invoiceHelpers.jsx before calling this.
+  addPaymentEntry: async (invoiceId, entry, currentUser) => {
+    const { dbLocked } = get();
+    if (dbLocked) throw new Error("Invoice database is currently locked.");
+    if (!currentUser) throw new Error("Authentication error. Please log out and log in again.");
+
+    set({ loading: true, error: null });
+    try {
+      // Read current invoice for validation and totalPaid recomputation.
+      const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
+      const invoice = invoiceSnap.data();
+
+      if (invoice.status !== "APPROVED") {
+        throw new Error("Payments can only be recorded on approved invoices.");
+      }
+
+      const entryAmount  = parseFloat(entry.amount || 0);
+      const currentTotal = computeTotalPaid({ ...invoice, id: invoiceId });
+      const invoiceTotal = parseFloat(invoice.totalAmount || 0);
+
+      if (entryAmount <= 0) {
+        throw new Error("Payment amount must be greater than zero.");
+      }
+      if (currentTotal + entryAmount > invoiceTotal + 0.01) {
+        // 0.01 tolerance for floating-point rounding
+        throw new Error(
+          `Payment of ${entryAmount} would exceed the invoice total. Balance remaining: ₹${(invoiceTotal - currentTotal).toFixed(2)}.`
+        );
+      }
+
+      const newTotalPaid = parseFloat((currentTotal + entryAmount).toFixed(2));
+      const newPaymentStatus = derivePaymentStatus(
+        invoice.paymentMethod,
+        newTotalPaid,
+        invoiceTotal
+      );
+
+      // Add the recordedAt timestamp before writing
+      const entryWithTimestamp = {
+        ...entry,
+        recordedAt: new Date().toISOString(), // ISO string; serverTimestamp() not allowed inside arrayUnion
+      };
+
+      await updateDoc(doc(db, INVOICE_COLLECTION, invoiceId), {
+        paymentEntries: arrayUnion(entryWithTimestamp),
+        totalPaid:      newTotalPaid,
+        paymentStatus:  newPaymentStatus,
+        updatedAt:      serverTimestamp(),
+      });
+
+      const recordedByName =
+        currentUser.displayName || currentUser.email || "Unknown";
+
+      await logAudit({
+        action:           "invoice.payment_entry_added",
+        userId:           currentUser.uid,
+        userName:         recordedByName,
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:       invoice.invoiceNo,
+          entryAmount,
+          entryMethod:     entry.method,
+          entryDate:       entry.date,
+          newTotalPaid,
+          newPaymentStatus,
+          recordedByName,
+        },
+      });
+
+      // Refresh the currentInvoice in the store so InvoiceDetail re-renders
+      // immediately without waiting for the real-time listener to fire.
+      const refreshed = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (refreshed.exists()) {
+        set({ currentInvoice: { id: refreshed.id, ...refreshed.data() }, loading: false });
+      } else {
+        set({ loading: false });
+      }
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // ── deletePaymentEntry ──────────────────────────────────────
+  // Removes a payment entry by id from an invoice's paymentEntries[] array,
+  // recomputes totalPaid, and re-derives paymentStatus atomically.
+  deletePaymentEntry: async (invoiceId, entryId, currentUser) => {
+    const { dbLocked } = get();
+    if (dbLocked) throw new Error("Invoice database is currently locked.");
+    if (!currentUser) throw new Error("Authentication error. Please log out and log in again.");
+
+    set({ loading: true, error: null });
+    try {
+      const invoiceSnap = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (!invoiceSnap.exists()) throw new Error("Invoice not found.");
+      const invoice = invoiceSnap.data();
+
+      const currentEntries = Array.isArray(invoice.paymentEntries)
+        ? invoice.paymentEntries
+        : [];
+
+      const entryToRemove = currentEntries.find((e) => e.id === entryId);
+      if (!entryToRemove) throw new Error("Payment entry not found.");
+
+      // Firestore arrayRemove requires the exact object to match.
+      // Since entryToRemove comes directly from the document, it will match.
+      const remainingEntries = currentEntries.filter((e) => e.id !== entryId);
+      const newTotalPaid = parseFloat(
+        remainingEntries.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0).toFixed(2)
+      );
+      const newPaymentStatus = derivePaymentStatus(
+        invoice.paymentMethod,
+        newTotalPaid,
+        parseFloat(invoice.totalAmount || 0)
+      );
+
+      await updateDoc(doc(db, INVOICE_COLLECTION, invoiceId), {
+        paymentEntries: arrayRemove(entryToRemove),
+        totalPaid:      newTotalPaid,
+        paymentStatus:  newPaymentStatus,
+        updatedAt:      serverTimestamp(),
+      });
+
+      const deletedByName =
+        currentUser.displayName || currentUser.email || "Unknown";
+
+      await logAudit({
+        action:           "invoice.payment_entry_deleted",
+        userId:           currentUser.uid,
+        userName:         deletedByName,
+        targetId:         invoiceId,
+        targetCollection: INVOICE_COLLECTION,
+        metadata: {
+          invoiceNo:       invoice.invoiceNo,
+          deletedEntryId:  entryId,
+          deletedAmount:   entryToRemove.amount,
+          deletedMethod:   entryToRemove.method,
+          newTotalPaid,
+          newPaymentStatus,
+          deletedByName,
+        },
+      });
+
+      // Refresh currentInvoice in store
+      const refreshed = await getDoc(doc(db, INVOICE_COLLECTION, invoiceId));
+      if (refreshed.exists()) {
+        set({ currentInvoice: { id: refreshed.id, ...refreshed.data() }, loading: false });
+      } else {
+        set({ loading: false });
+      }
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // ── export invoices (SuperAdmin backup) ────────────────────
+  exportInvoices: async () => {
+    try {
+      const snap = await getDocs(collection(db, INVOICE_COLLECTION));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (err) {
+      console.error("Export error:", err);
+      throw err;
+    }
+  },
+
   // ── log PDF download ───────────────────────────────────────
   logPdfDownload: async (invoiceId, invoiceNo, currentUser) => {
-    // FIX: was logAudit("invoice_pdf_downloaded", invoiceId, INVOICE_COLLECTION, {...})
     await logAudit({
       action:           "invoice.pdf_downloaded",
       userId:           currentUser.uid,
@@ -441,7 +613,6 @@ const useInvoiceStore = create((set, get) => ({
 
   // ── log WhatsApp send ──────────────────────────────────────
   logWhatsAppSent: async (invoiceId, invoiceNo, phone, currentUser) => {
-    // FIX: was logAudit("invoice_whatsapp_sent", invoiceId, INVOICE_COLLECTION, {...})
     await logAudit({
       action:           "invoice.whatsapp_sent",
       userId:           currentUser.uid,
@@ -477,6 +648,8 @@ const useInvoiceStore = create((set, get) => ({
         paymentStatus: "UNPAID",
         totalReturnAmount,
         totalAmount: totalReturnAmount,
+        paymentEntries: [],
+        totalPaid: 0,
         createdBy: currentUser.uid,
         createdByName,
         approvedBy: null,
@@ -486,7 +659,6 @@ const useInvoiceStore = create((set, get) => ({
       };
       const ref = await addDoc(collection(db, INVOICE_COLLECTION), payload);
 
-      // FIX: was logAudit("return_invoice_created", ref.id, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           "invoice.return_created",
         userId:           currentUser.uid,
@@ -541,7 +713,6 @@ const useInvoiceStore = create((set, get) => ({
       }
       await batch.commit();
 
-      // FIX: was logAudit("return_invoice_approved", invoiceId, INVOICE_COLLECTION, {...})
       await logAudit({
         action:           "invoice.return_approved",
         userId:           currentUser.uid,
@@ -564,9 +735,6 @@ const useInvoiceStore = create((set, get) => ({
   },
 
   // ── update invoice (owner/superadmin edit) ─────────────────
-  // Can only edit invoices in PENDING or APPROVED state.
-  // Does NOT re-run inventory deduction — that only happens at approval time.
-  // The caller is responsible for passing a clean delta of fields to update.
   updateInvoice: async (invoiceId, updates, currentUser) => {
     const { dbLocked } = get();
     if (dbLocked) throw new Error("Invoice database is currently locked.");

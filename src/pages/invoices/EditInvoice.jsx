@@ -1,4 +1,4 @@
-// SGA — Last updated: New file — Edit Invoice page for Owner/SuperAdmin; allows editing payment info, dates and payment notes on any non-locked invoice
+// SGA — Last updated: Restored original 4-section structure; form init reads amountPaid from paymentEntries[0] or computeTotalPaid; handleSave writes paymentEntries + totalPaid; Payment Breakdown section added below Payment Note; AddPaymentEntryModal for overlay add
 // ============================================================
 // EditInvoice.jsx — Edit an existing invoice (Owner / SuperAdmin only)
 // ============================================================
@@ -6,36 +6,41 @@
 // SCOPE OF EDIT
 //   - Invoice date (with the same "M" override indicator as in CreateInvoice)
 //   - Due date
-//   - Payment method (Cash, UPI, Card, Loan, EMI, Debit)
-//   - Amount paid
+//   - Payment method (Cash, UPI, Card, Loan, EMI, Bank Transfer)
+//   - Amount paid (primary / first entry)
 //   - Loan / EMI fields (provider, EMI amount, completion date)
 //   - Payment note
 //   - Discount amount
+//   - Payment Breakdown: view / delete existing entries; add new entries
 //
 // OUT OF SCOPE
 //   Items, labour cost, customer, and vehicle details are intentionally NOT
-//   editable here.  Those affect inventory deduction which already ran at
-//   approval time.  Changing them post-approval would require a return invoice.
+//   editable here. Those affect inventory deduction which already ran at
+//   approval time. Changing them post-approval requires a return invoice.
 //
 // ACCESS
-//   Owner and SuperAdmin only.  Route protected in App.jsx.
+//   Owner and SuperAdmin only. Route protected in App.jsx.
 //   Employee navigating to /invoices/:id/edit is redirected to /unauthorized.
 
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Save, Calendar, CreditCard, Tag, Info, Check,
+  ArrowLeft, Save, Calendar, CreditCard, Tag, Info, Check, Trash2,
 } from "lucide-react";
 import useInvoiceStore  from "../../store/invoiceStore";
 import useAuthStore     from "../../store/authStore";
 import useThemeStore    from "../../store/themeStore";
 import DBLockedBanner   from "../../components/invoices/DBLockedBanner";
+import AddPaymentEntryModal from "../../components/invoices/AddPaymentEntryModal";
 import {
   PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
   requiresLoanFields,
   derivePaymentStatus,
   formatCurrency,
   calculateTotals,
+  computeTotalPaid,
+  buildPaymentEntry,
 } from "../../lib/invoiceHelpers";
 
 const GST_RATE = 0.09;
@@ -49,6 +54,7 @@ export default function EditInvoice() {
   const {
     currentInvoice, loadInvoice,
     updateInvoice,
+    deletePaymentEntry,
     dbLocked, dbLockedBy,
     subscribeSystemConfig, loadSettings,
     gstNumber,
@@ -59,17 +65,17 @@ export default function EditInvoice() {
   const isOwnerOrAbove = ["owner", "superadmin"].includes(role);
 
   // ── Colours ─────────────────────────────────────────────
-  const bg          = isDark ? "#1A1A1A" : "#CDCBC9";
-  const cardBg      = isDark ? "#2A2A2A" : "#FFFFFF";
-  const border      = isDark ? "#3A3A3A" : "#E8E2DF";
-  const textPrimary = isDark ? "#E8E8E8" : "#222222";
+  const bg           = isDark ? "#1A1A1A" : "#CDCBC9";
+  const cardBg       = isDark ? "#2A2A2A" : "#FFFFFF";
+  const border       = isDark ? "#3A3A3A" : "#E8E2DF";
+  const textPrimary  = isDark ? "#E8E8E8" : "#222222";
   const textSecondary = isDark ? "#999999" : "#666666";
-  const inputBg     = isDark ? "#2A2A2A" : "#FFFFFF";
-  const sectionBg   = isDark ? "#1A1A1A" : "#F5F0EE";
+  const inputBg      = isDark ? "#2A2A2A" : "#FFFFFF";
+  const sectionBg    = isDark ? "#1A1A1A" : "#F5F0EE";
 
   // ── Form state ───────────────────────────────────────────
   const todayStr = new Date().toISOString().split("T")[0];
-  const [form, setForm]           = useState(null); // null until invoice loads
+  const [form, setForm]           = useState(null);
   const [saving, setSaving]       = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [success, setSuccess]     = useState(false);
@@ -77,6 +83,9 @@ export default function EditInvoice() {
   // Discount draft state
   const [discountDraft,     setDiscountDraft]     = useState("");
   const [discountConfirmed, setDiscountConfirmed] = useState(false);
+
+  // Payment Breakdown modal
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   useEffect(() => {
     clearError?.();
@@ -90,21 +99,29 @@ export default function EditInvoice() {
     if (!currentInvoice) return;
     const inv = currentInvoice;
 
-    // Re-derive discount state from saved values
     const savedDiscount = parseFloat(inv.discountAmount || 0);
     setDiscountDraft(savedDiscount > 0 ? String(savedDiscount) : "");
     setDiscountConfirmed(savedDiscount > 0);
 
+    // For amountPaid: if the invoice has paymentEntries, read from first entry.
+    // This is the "primary" payment the user manages from this form.
+    // For legacy invoices without entries, fall back to computeTotalPaid.
+    const firstEntry =
+      Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 0
+        ? inv.paymentEntries[0]
+        : null;
+    const initAmountPaid = firstEntry ? firstEntry.amount : computeTotalPaid(inv);
+
     setForm({
-      invoiceDate:        inv.invoiceDate || todayStr,
-      dueDate:            inv.dueDate     || "",
-      isDateOverridden:   inv.isDateOverridden || false,
-      gstEnabled:         inv.gstEnabled  || false,
-      paymentMethod:      inv.paymentMethod || "CASH",
-      amountPaid:         inv.amountPaid  != null ? String(inv.amountPaid) : "",
-      paymentNote:        inv.paymentNote || "",
-      loanProvider:       inv.loanProvider || "",
-      emiAmount:          inv.emiAmount   || "",
+      invoiceDate:        inv.invoiceDate        || todayStr,
+      dueDate:            inv.dueDate            || "",
+      isDateOverridden:   inv.isDateOverridden   || false,
+      gstEnabled:         inv.gstEnabled         || false,
+      paymentMethod:      inv.paymentMethod      || "CASH",
+      amountPaid:         initAmountPaid > 0 ? String(initAmountPaid) : "",
+      paymentNote:        inv.paymentNote        || "",
+      loanProvider:       inv.loanProvider       || "",
+      emiAmount:          inv.emiAmount          || "",
       loanCompletionDate: inv.loanCompletionDate || "",
       discountAmount:     savedDiscount,
     });
@@ -123,10 +140,10 @@ export default function EditInvoice() {
   const labourCost = parseFloat(inv?.labourCost || 0);
   const gstOn      = form?.gstEnabled || false;
 
-  const baseTotals      = calculateTotals({ items, labourCost });
-  const subtotal        = baseTotals.subtotal;
-  const cgst            = gstOn ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
-  const sgst            = gstOn ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
+  const baseTotals       = calculateTotals({ items, labourCost });
+  const subtotal         = baseTotals.subtotal;
+  const cgst             = gstOn ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
+  const sgst             = gstOn ? parseFloat((subtotal * GST_RATE).toFixed(2)) : 0;
   const preDiscountTotal = parseFloat((subtotal + cgst + sgst).toFixed(2));
 
   const confirmedDiscount = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
@@ -146,10 +163,9 @@ export default function EditInvoice() {
         next.isDateOverridden = value !== todayStr;
       }
       if (field === "paymentMethod") {
-        // DEBIT auto-zeroes amount paid (same as CreateInvoice)
-        next.amountPaid = value === "DEBIT" ? "0" : prev.amountPaid;
-        next.loanProvider = "";
-        next.emiAmount = "";
+        next.amountPaid         = value === "DEBIT" ? "0" : prev.amountPaid;
+        next.loanProvider       = "";
+        next.emiAmount          = "";
         next.loanCompletionDate = "";
       }
       return next;
@@ -181,6 +197,43 @@ export default function EditInvoice() {
     setSaveError(null);
 
     try {
+      // Build new payment entries:
+      // - First slot (primary) is replaced from the form's amountPaid field.
+      // - Entries at index 1+ (additional, managed via AddPaymentEntryModal /
+      //   deletePaymentEntry) are preserved from the current Firestore state.
+      const existingEntries = Array.isArray(inv.paymentEntries)
+        ? inv.paymentEntries
+        : [];
+      const additionalEntries = existingEntries.slice(1);
+
+      const primaryEntry =
+        amountPaidNum > 0 && !["LOAN", "EMI"].includes(form.paymentMethod)
+          ? buildPaymentEntry({
+              amount:    amountPaidNum,
+              method:    form.paymentMethod,
+              date:      form.invoiceDate,
+              reference: form.paymentNote || "",
+              currentUser,
+            })
+          : null;
+
+      const newPaymentEntries = [
+        ...(primaryEntry ? [primaryEntry] : []),
+        ...additionalEntries,
+      ];
+
+      const newTotalPaid = newPaymentEntries.reduce(
+        (s, e) => s + parseFloat(e.amount || 0),
+        0
+      );
+
+      // Re-derive paymentStatus using the updated totalPaid + new totalAmount
+      const newPaymentStatus = derivePaymentStatus(
+        form.paymentMethod,
+        newTotalPaid,
+        totalAmount
+      );
+
       const updates = {
         invoiceDate:        form.invoiceDate,
         isDateOverridden:   form.isDateOverridden,
@@ -193,13 +246,16 @@ export default function EditInvoice() {
         preDiscountTotal,
         discountAmount:     confirmedDiscount,
         totalAmount,
-        // Payment
+        // Payment — new entries model
+        paymentEntries:     newPaymentEntries,
+        totalPaid:          newTotalPaid,
+        paymentStatus:      newPaymentStatus,
+        // Legacy flat fields kept for backward compat
         paymentMethod:      form.paymentMethod,
         amountPaid:         amountPaidNum,
-        paymentStatus,
-        paymentNote:        form.paymentNote || "",
-        loanProvider:       form.loanProvider || "",
-        emiAmount:          form.emiAmount    || "",
+        paymentNote:        form.paymentNote        || "",
+        loanProvider:       form.loanProvider       || "",
+        emiAmount:          form.emiAmount ? parseFloat(form.emiAmount) : null,
         loanCompletionDate: form.loanCompletionDate || "",
       };
 
@@ -240,6 +296,33 @@ export default function EditInvoice() {
 
   const fieldGroup = { marginBottom: 14 };
 
+  const SectionHeader = ({ icon: Icon, title }) => (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        marginBottom: 14,
+        paddingBottom: 8,
+        borderBottom: `1px solid ${border}`,
+      }}
+    >
+      <Icon size={15} color="#661F1F" />
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#661F1F",
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        {title}
+      </span>
+    </div>
+  );
+
   // ── Loading / error states ────────────────────────────────
   if (loading && !inv) {
     return (
@@ -256,6 +339,10 @@ export default function EditInvoice() {
       </div>
     );
   }
+
+  // Balance due for AddPaymentEntryModal — uses computeTotalPaid to account
+  // for all existing entries (not just the primary one being edited)
+  const entryBalanceDue = inv ? Math.max(0, totalAmount - computeTotalPaid(inv)) : 0;
 
   return (
     <div style={{ minHeight: "100vh", background: bg, paddingBottom: 100 }}>
@@ -276,12 +363,27 @@ export default function EditInvoice() {
       >
         <button
           onClick={() => navigate(`/invoices/${id}`)}
-          style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: 6, cursor: "pointer", color: "#FFFFFF", display: "flex" }}
+          style={{
+            background: "rgba(255,255,255,0.15)",
+            border: "none",
+            borderRadius: 8,
+            padding: 6,
+            cursor: "pointer",
+            color: "#FFFFFF",
+            display: "flex",
+          }}
         >
           <ArrowLeft size={18} />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ color: "#FFFFFF", fontSize: 15, fontWeight: 700, fontFamily: "'Courier New', monospace" }}>
+          <div
+            style={{
+              color: "#FFFFFF",
+              fontSize: 15,
+              fontWeight: 700,
+              fontFamily: "'Courier New', monospace",
+            }}
+          >
             Edit Invoice
           </div>
           {inv && (
@@ -294,7 +396,16 @@ export default function EditInvoice() {
 
       {/* ── Success banner ─────────────────────────────────── */}
       {success && (
-        <div style={{ background: "#E8F5E9", borderBottom: "1px solid #C8E6C9", padding: "10px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            background: "#E8F5E9",
+            borderBottom: "1px solid #C8E6C9",
+            padding: "10px 18px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
           <Check size={16} color="#1A7A1A" />
           <span style={{ fontSize: 13, fontWeight: 600, color: "#1A7A1A" }}>
             Invoice updated successfully! Redirecting…
@@ -317,14 +428,24 @@ export default function EditInvoice() {
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#661F1F",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 8,
+                  fontFamily: "Arial, sans-serif",
+                }}
+              >
                 Invoice Summary (read-only)
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {[
                   { label: "Customer", value: inv.customerSnapshot?.name || "—" },
-                  { label: "Items", value: `${items.length} item${items.length !== 1 ? "s" : ""}` },
-                  { label: "Labour", value: formatCurrency(labourCost) },
+                  { label: "Items",    value: `${items.length} item${items.length !== 1 ? "s" : ""}` },
+                  { label: "Labour",   value: formatCurrency(labourCost) },
                   { label: "Subtotal", value: formatCurrency(subtotal) },
                 ].map(({ label, value }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
@@ -333,26 +454,49 @@ export default function EditInvoice() {
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 8, fontSize: 11, color: textSecondary, display: "flex", alignItems: "center", gap: 5 }}>
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: textSecondary,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
                 <Info size={12} />
-                Items and labour cannot be changed after creation. Use a Return Invoice to reverse items.
+                Items and labour cannot be changed after approval. Use a Return Invoice to reverse items.
               </div>
             </div>
 
-            {/* ── Invoice Date ─────────────────────────────── */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: "16px", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
-                <Calendar size={15} color="#661F1F" />
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif" }}>
-                  Invoice Dates
-                </span>
-              </div>
+            {/* ── Invoice Dates ─────────────────────────────── */}
+            <div
+              style={{
+                background: cardBg,
+                border: `1px solid ${border}`,
+                borderRadius: 12,
+                padding: "16px",
+                marginBottom: 12,
+              }}
+            >
+              <SectionHeader icon={Calendar} title="Invoice Dates" />
 
               <div style={fieldGroup}>
                 <label style={labelStyle}>
                   Invoice Date
                   {form.isDateOverridden && (
-                    <span style={{ marginLeft: 8, background: "#FFF3E0", color: "#CC6600", fontSize: 10, padding: "2px 7px", borderRadius: 99, fontWeight: 700, border: "1px solid #FFB74D" }}>
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        background: "#FFF3E0",
+                        color: "#CC6600",
+                        fontSize: 10,
+                        padding: "2px 7px",
+                        borderRadius: 99,
+                        fontWeight: 700,
+                        border: "1px solid #FFB74D",
+                      }}
+                    >
                       M — Manually Changed
                     </span>
                   )}
@@ -361,7 +505,13 @@ export default function EditInvoice() {
                   <Calendar
                     size={15}
                     color={form.isDateOverridden ? "#CC6600" : "#888"}
-                    style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
                   />
                   <input
                     type="date"
@@ -374,6 +524,8 @@ export default function EditInvoice() {
                       color: form.isDateOverridden ? "#CC6600" : textPrimary,
                       fontWeight: form.isDateOverridden ? 600 : 400,
                     }}
+                    onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                    onBlur={(e) => (e.target.style.borderColor = form.isDateOverridden ? "#CC6600" : border)}
                   />
                 </div>
                 {form.isDateOverridden && (
@@ -390,18 +542,23 @@ export default function EditInvoice() {
                   value={form.dueDate}
                   onChange={(e) => handleChange("dueDate", e.target.value)}
                   style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                  onBlur={(e) => (e.target.style.borderColor = border)}
                 />
               </div>
             </div>
 
-            {/* ── GST toggle (only if GSTIN configured) ────── */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: "16px", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
-                <Tag size={15} color="#661F1F" />
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif" }}>
-                  GST &amp; Discount
-                </span>
-              </div>
+            {/* ── GST & Discount ────────────────────────────── */}
+            <div
+              style={{
+                background: cardBg,
+                border: `1px solid ${border}`,
+                borderRadius: 12,
+                padding: "16px",
+                marginBottom: 12,
+              }}
+            >
+              <SectionHeader icon={Tag} title="GST & Discount" />
 
               {gstNumber ? (
                 <div
@@ -415,7 +572,9 @@ export default function EditInvoice() {
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>Include GST</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>
+                        Include GST
+                      </div>
                       <div style={{ fontSize: 11, color: textSecondary, marginTop: 2 }}>
                         GSTIN: {gstNumber} · CGST 9% + SGST 9% = 18%
                       </div>
@@ -439,7 +598,15 @@ export default function EditInvoice() {
                     </div>
                   </div>
                   {form.gstEnabled && (
-                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #C8E6C9", display: "flex", gap: 16 }}>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        paddingTop: 10,
+                        borderTop: "1px solid #C8E6C9",
+                        display: "flex",
+                        gap: 16,
+                      }}
+                    >
                       <div>
                         <div style={{ fontSize: 11, color: "#666" }}>CGST (9%)</div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
@@ -456,21 +623,46 @@ export default function EditInvoice() {
                   )}
                 </div>
               ) : (
-                <div style={{ background: sectionBg, borderRadius: 8, padding: "10px 14px", marginBottom: 14, display: "flex", gap: 8, alignItems: "center" }}>
+                <div
+                  style={{
+                    background: sectionBg,
+                    borderRadius: 8,
+                    padding: "10px 14px",
+                    marginBottom: 14,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
                   <Info size={14} color="#888" />
-                  <span style={{ fontSize: 12, color: textSecondary }}>GST not applicable — no GSTIN configured in Settings.</span>
+                  <span style={{ fontSize: 12, color: textSecondary }}>
+                    GST not applicable — no GSTIN configured in Settings.
+                  </span>
                 </div>
               )}
 
-              {/* Invoice total display */}
+              {/* Invoice total */}
               <div
                 style={{
-                  background: "#F5E6E6", borderRadius: 10, padding: "12px 16px", marginBottom: 12,
-                  display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #E8C8C8",
+                  background: "#F5E6E6",
+                  borderRadius: 10,
+                  padding: "12px 16px",
+                  marginBottom: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  border: "1px solid #E8C8C8",
                 }}
               >
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#661F1F" }}>Invoice Total</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: "#661F1F", fontFamily: "'Courier New', monospace" }}>
+                <span
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    color: "#661F1F",
+                    fontFamily: "'Courier New', monospace",
+                  }}
+                >
                   {formatCurrency(preDiscountTotal)}
                 </span>
               </div>
@@ -486,9 +678,22 @@ export default function EditInvoice() {
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <Tag size={15} color="#661F1F" />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#661F1F" }}>Discount (optional)</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#661F1F" }}>
+                    Discount (optional)
+                  </span>
                   {discountConfirmed && confirmedDiscount > 0 && (
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#661F1F", background: "#F5E6E6", padding: "2px 8px", borderRadius: 99, border: "1px solid #E8C8C8" }}>
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#661F1F",
+                        background: "#F5E6E6",
+                        padding: "2px 8px",
+                        borderRadius: 99,
+                        border: "1px solid #E8C8C8",
+                      }}
+                    >
                       - {formatCurrency(confirmedDiscount)}
                     </span>
                   )}
@@ -500,13 +705,35 @@ export default function EditInvoice() {
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <div style={{ position: "relative", flex: 1 }}>
-                        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "#661F1F", fontWeight: 700, pointerEvents: "none" }}>₹</span>
+                        <span
+                          style={{
+                            position: "absolute",
+                            left: 12,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            fontSize: 16,
+                            color: "#661F1F",
+                            fontWeight: 700,
+                            pointerEvents: "none",
+                          }}
+                        >
+                          ₹
+                        </span>
                         <input
-                          type="number" min={0} max={preDiscountTotal} step={1}
+                          type="number"
+                          min={0}
+                          max={preDiscountTotal}
+                          step={1}
                           value={discountDraft}
                           onChange={(e) => setDiscountDraft(e.target.value)}
                           placeholder="0"
-                          style={{ ...inputStyle, paddingLeft: 28, fontFamily: "'Courier New', monospace" }}
+                          style={{
+                            ...inputStyle,
+                            paddingLeft: 28,
+                            fontFamily: "'Courier New', monospace",
+                          }}
+                          onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                          onBlur={(e) => (e.target.style.borderColor = border)}
                           onKeyDown={(e) => { if (e.key === "Enter") handleConfirmDiscount(); }}
                         />
                       </div>
@@ -515,13 +742,28 @@ export default function EditInvoice() {
                         disabled={!discountDraft || parseFloat(discountDraft) <= 0}
                         style={{
                           padding: "0 16px",
-                          background: discountDraft && parseFloat(discountDraft) > 0 ? "#661F1F" : (isDark ? "#333" : "#E0D8D4"),
-                          border: "none", borderRadius: 8,
-                          color: discountDraft && parseFloat(discountDraft) > 0 ? "#FFFFFF" : textSecondary,
-                          fontWeight: 700, fontSize: 13,
-                          cursor: discountDraft && parseFloat(discountDraft) > 0 ? "pointer" : "not-allowed",
-                          display: "flex", alignItems: "center", gap: 5,
-                          fontFamily: "inherit", whiteSpace: "nowrap", minHeight: 44,
+                          background:
+                            discountDraft && parseFloat(discountDraft) > 0
+                              ? "#661F1F"
+                              : (isDark ? "#333" : "#E0D8D4"),
+                          border: "none",
+                          borderRadius: 8,
+                          color:
+                            discountDraft && parseFloat(discountDraft) > 0
+                              ? "#FFFFFF"
+                              : textSecondary,
+                          fontWeight: 700,
+                          fontSize: 13,
+                          cursor:
+                            discountDraft && parseFloat(discountDraft) > 0
+                              ? "pointer"
+                              : "not-allowed",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontFamily: "inherit",
+                          whiteSpace: "nowrap",
+                          minHeight: 44,
                         }}
                       >
                         <Check size={15} /> Confirm
@@ -529,16 +771,37 @@ export default function EditInvoice() {
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: isDark ? "#2A2A2A" : "#FFFFFF", borderRadius: 8, border: "1px solid #E8C8C8" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 12px",
+                      background: isDark ? "#2A2A2A" : "#FFFFFF",
+                      borderRadius: 8,
+                      border: "1px solid #E8C8C8",
+                    }}
+                  >
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#661F1F" }}>Discount Applied</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#661F1F" }}>
+                        Discount Applied
+                      </div>
                       <div style={{ fontSize: 11, color: textSecondary, marginTop: 2 }}>
                         Customer saves {formatCurrency(confirmedDiscount)}
                       </div>
                     </div>
                     <button
                       onClick={handleRemoveDiscount}
-                      style={{ background: "none", border: "1px solid #E8C8C8", borderRadius: 6, padding: "4px 10px", fontSize: 11, color: textSecondary, cursor: "pointer", fontFamily: "inherit" }}
+                      style={{
+                        background: "none",
+                        border: "1px solid #E8C8C8",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        fontSize: 11,
+                        color: textSecondary,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
                     >
                       Remove
                     </button>
@@ -551,29 +814,45 @@ export default function EditInvoice() {
                 <div
                   style={{
                     background: isDark ? "#1A2A1A" : "#E8F5E9",
-                    borderRadius: 10, padding: "12px 16px", marginTop: 12,
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    borderRadius: 10,
+                    padding: "12px 16px",
+                    marginTop: 12,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                     border: "1.5px solid #A5D6A7",
                   }}
                 >
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#1A7A1A" }}>Revised Total</span>
-                  <span style={{ fontSize: 22, fontWeight: 700, color: "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#1A7A1A" }}>
+                    Revised Total
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 700,
+                      color: "#1A7A1A",
+                      fontFamily: "'Courier New', monospace",
+                    }}
+                  >
                     {formatCurrency(totalAmount)}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* ── Payment ───────────────────────────────────── */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: "16px", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
-                <CreditCard size={15} color="#661F1F" />
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif" }}>
-                  Payment Details
-                </span>
-              </div>
+            {/* ── Payment Details ───────────────────────────── */}
+            <div
+              style={{
+                background: cardBg,
+                border: `1px solid ${border}`,
+                borderRadius: 12,
+                padding: "16px",
+                marginBottom: 12,
+              }}
+            >
+              <SectionHeader icon={CreditCard} title="Payment Details" />
 
-              {/* Payment method */}
+              {/* Payment method chips */}
               <div style={fieldGroup}>
                 <label style={labelStyle}>Payment Method *</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -582,12 +861,16 @@ export default function EditInvoice() {
                       key={m.value}
                       onClick={() => handleChange("paymentMethod", m.value)}
                       style={{
-                        padding: "8px 16px", borderRadius: 8,
+                        padding: "8px 16px",
+                        borderRadius: 8,
                         border: `1.5px solid ${form.paymentMethod === m.value ? "#661F1F" : border}`,
                         background: form.paymentMethod === m.value ? "#661F1F" : inputBg,
                         color: form.paymentMethod === m.value ? "#FFFFFF" : textPrimary,
-                        fontSize: 13, fontWeight: 600, cursor: "pointer",
-                        transition: "all 0.15s", fontFamily: "inherit",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                        fontFamily: "inherit",
                       }}
                     >
                       {m.label}
@@ -601,27 +884,72 @@ export default function EditInvoice() {
                 <div style={fieldGroup}>
                   <label style={labelStyle}>Amount Paid *</label>
                   <div style={{ position: "relative" }}>
-                    <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "#661F1F", fontWeight: 700, pointerEvents: "none" }}>₹</span>
+                    <span
+                      style={{
+                        position: "absolute",
+                        left: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        fontSize: 16,
+                        color: "#661F1F",
+                        fontWeight: 700,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      ₹
+                    </span>
                     <input
-                      type="number" min={0} max={totalAmount} step={0.01}
+                      type="number"
+                      min={0}
+                      max={totalAmount}
+                      step={0.01}
                       value={form.amountPaid}
                       onChange={(e) => handleChange("amountPaid", e.target.value)}
                       placeholder={`0 – ${totalAmount}`}
-                      style={{ ...inputStyle, paddingLeft: 28, fontFamily: "'Courier New', monospace" }}
+                      style={{
+                        ...inputStyle,
+                        paddingLeft: 28,
+                        fontFamily: "'Courier New', monospace",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                      onBlur={(e) => (e.target.style.borderColor = border)}
                     />
                   </div>
                   {/* Quick-fill buttons */}
                   <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    <button onClick={() => handleChange("amountPaid", "0")} style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}>₹0</button>
-                    <button onClick={() => handleChange("amountPaid", String(Math.round(totalAmount / 2)))} style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}>50% ({formatCurrency(totalAmount / 2)})</button>
-                    <button onClick={() => handleChange("amountPaid", String(totalAmount))} style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}>Full ({formatCurrency(totalAmount)})</button>
+                    <button
+                      onClick={() => handleChange("amountPaid", "0")}
+                      style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                    >
+                      ₹0
+                    </button>
+                    <button
+                      onClick={() => handleChange("amountPaid", String(Math.round(totalAmount / 2)))}
+                      style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                    >
+                      50% ({formatCurrency(totalAmount / 2)})
+                    </button>
+                    <button
+                      onClick={() => handleChange("amountPaid", String(totalAmount))}
+                      style={{ padding: "4px 10px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                    >
+                      Full ({formatCurrency(totalAmount)})
+                    </button>
                   </div>
                 </div>
               )}
 
               {/* Loan/EMI fields */}
               {requiresLoanFields(form.paymentMethod) && (
-                <div style={{ background: "#E3F2FD", border: "1.5px solid #90CAF9", borderRadius: 10, padding: "14px", marginBottom: 14 }}>
+                <div
+                  style={{
+                    background: "#E3F2FD",
+                    border: "1.5px solid #90CAF9",
+                    borderRadius: 10,
+                    padding: "14px",
+                    marginBottom: 14,
+                  }}
+                >
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#0055CC", marginBottom: 12 }}>
                     {form.paymentMethod === "EMI" ? "EMI Details" : "Loan Details"}
                   </div>
@@ -632,6 +960,8 @@ export default function EditInvoice() {
                       value={form.loanProvider}
                       onChange={(e) => handleChange("loanProvider", e.target.value)}
                       style={{ ...inputStyle, borderColor: "#90CAF9" }}
+                      onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                      onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
                     />
                   </div>
                   {form.paymentMethod === "EMI" && (
@@ -640,11 +970,15 @@ export default function EditInvoice() {
                       <div style={{ position: "relative" }}>
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#0055CC", fontWeight: 700, pointerEvents: "none" }}>₹</span>
                         <input
-                          type="number" min={0} step={100}
+                          type="number"
+                          min={0}
+                          step={100}
                           placeholder="Monthly EMI"
                           value={form.emiAmount}
                           onChange={(e) => handleChange("emiAmount", e.target.value)}
                           style={{ ...inputStyle, paddingLeft: 28, borderColor: "#90CAF9", fontFamily: "'Courier New', monospace" }}
+                          onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                          onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
                         />
                       </div>
                     </div>
@@ -656,6 +990,8 @@ export default function EditInvoice() {
                       value={form.loanCompletionDate}
                       onChange={(e) => handleChange("loanCompletionDate", e.target.value)}
                       style={{ ...inputStyle, borderColor: "#90CAF9" }}
+                      onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                      onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
                     />
                   </div>
                 </div>
@@ -665,14 +1001,28 @@ export default function EditInvoice() {
               {form.paymentMethod !== "LOAN" && form.paymentMethod !== "EMI" && (
                 <div
                   style={{
-                    display: "flex", justifyContent: "space-between", padding: "10px 14px",
-                    background: balanceDue > 0 ? (isDark ? "#2A1A1A" : "#FFEBEE") : (isDark ? "#1A2A1A" : "#E8F5E9"),
-                    borderRadius: 8, border: `1px solid ${balanceDue > 0 ? "#FFCDD2" : "#C8E6C9"}`,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    padding: "10px 14px",
+                    background: balanceDue > 0
+                      ? (isDark ? "#2A1A1A" : "#FFEBEE")
+                      : (isDark ? "#1A2A1A" : "#E8F5E9"),
+                    borderRadius: 8,
+                    border: `1px solid ${balanceDue > 0 ? "#FFCDD2" : "#C8E6C9"}`,
                     marginBottom: 14,
                   }}
                 >
-                  <span style={{ fontSize: 13, fontWeight: 700, color: balanceDue > 0 ? "#CC0000" : "#1A7A1A" }}>Balance Due</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: balanceDue > 0 ? "#CC0000" : "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: balanceDue > 0 ? "#CC0000" : "#1A7A1A" }}>
+                    Balance Due
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: balanceDue > 0 ? "#CC0000" : "#1A7A1A",
+                      fontFamily: "'Courier New', monospace",
+                    }}
+                  >
                     {formatCurrency(balanceDue)}
                   </span>
                 </div>
@@ -686,13 +1036,130 @@ export default function EditInvoice() {
                   value={form.paymentNote}
                   onChange={(e) => handleChange("paymentNote", e.target.value)}
                   style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                  onBlur={(e) => (e.target.style.borderColor = border)}
                 />
               </div>
+
+              {/* ── Payment Breakdown (only when entries exist) ── */}
+              {Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 0 && (
+                <>
+                  <div style={{ height: 1, background: border, margin: "4px 0 14px" }} />
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: textSecondary,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.4,
+                      fontFamily: "Arial, sans-serif",
+                      marginBottom: 10,
+                    }}
+                  >
+                    Payment Breakdown
+                  </div>
+                  {inv.paymentEntries.map((entry, idx) => (
+                    <div
+                      key={entry.id || idx}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 0",
+                        borderBottom: idx < inv.paymentEntries.length - 1
+                          ? `1px solid ${border}`
+                          : "none",
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 13, color: textPrimary, fontWeight: 600 }}>
+                          {PAYMENT_METHOD_LABELS[entry.method] || entry.method}
+                        </span>
+                        {entry.date && (
+                          <span style={{ fontSize: 11, color: textSecondary, marginLeft: 6 }}>
+                            ·{" "}
+                            {new Date(entry.date + "T00:00:00").toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </span>
+                        )}
+                        {entry.reference && (
+                          <div style={{ fontSize: 11, color: textSecondary }}>{entry.reference}</div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#1A7A1A",
+                            fontFamily: "'Courier New', monospace",
+                          }}
+                        >
+                          {formatCurrency(entry.amount)}
+                        </span>
+                        {entry.id && (
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm("Delete this payment entry? This cannot be undone.")) return;
+                              await deletePaymentEntry(id, entry.id, currentUser);
+                              await loadInvoice(id);
+                            }}
+                            title="Delete entry"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: 3,
+                              display: "flex",
+                              alignItems: "center",
+                              color: "#CC0000",
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={() => setShowPaymentModal(true)}
+                    style={{
+                      marginTop: 12,
+                      padding: "8px 14px",
+                      background: "none",
+                      border: `1.5px dashed ${border}`,
+                      borderRadius: 8,
+                      color: "#661F1F",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      width: "100%",
+                    }}
+                  >
+                    + Add Another Payment Method
+                  </button>
+                </>
+              )}
             </div>
 
             {/* ── Error message ─────────────────────────────── */}
             {saveError && (
-              <div style={{ background: "#FFEBEE", border: "1px solid #FFCDD2", borderRadius: 8, padding: "10px 14px", marginBottom: 12, color: "#CC0000", fontSize: 13 }}>
+              <div
+                style={{
+                  background: "#FFEBEE",
+                  border: "1px solid #FFCDD2",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  marginBottom: 12,
+                  color: "#CC0000",
+                  fontSize: 13,
+                }}
+              >
                 ⚠ {saveError}
               </div>
             )}
@@ -700,26 +1167,52 @@ export default function EditInvoice() {
         )}
       </div>
 
+      {/* ── AddPaymentEntryModal (overlay) ─────────────────── */}
+      {showPaymentModal && inv && (
+        <AddPaymentEntryModal
+          invoice={inv}
+          balanceDue={entryBalanceDue}
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={() => {
+            setShowPaymentModal(false);
+            loadInvoice(id);
+          }}
+          darkMode={isDark}
+        />
+      )}
+
       {/* ── Fixed save bar ─────────────────────────────────── */}
       {inv && !dbLocked && form && !success && (
         <div
           style={{
-            position: "fixed", bottom: 0, left: 0, right: 0,
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
             background: isDark ? "#1A1A1A" : "#FFFFFF",
             borderTop: `1px solid ${border}`,
             padding: "12px 16px",
-            display: "flex", gap: 10,
-            maxWidth: 640, margin: "0 auto",
-            zIndex: 50, boxSizing: "border-box",
+            display: "flex",
+            gap: 10,
+            maxWidth: 640,
+            margin: "0 auto",
+            zIndex: 50,
+            boxSizing: "border-box",
           }}
         >
           <button
             onClick={() => navigate(`/invoices/${id}`)}
             style={{
-              flex: 1, padding: "11px 0", background: "none",
-              border: `1.5px solid ${border}`, borderRadius: 10,
-              color: textPrimary, fontWeight: 600, fontSize: 13,
-              cursor: "pointer", fontFamily: "inherit",
+              flex: 1,
+              padding: "11px 0",
+              background: "none",
+              border: `1.5px solid ${border}`,
+              borderRadius: 10,
+              color: textPrimary,
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
             }}
           >
             Cancel
@@ -728,13 +1221,20 @@ export default function EditInvoice() {
             onClick={handleSave}
             disabled={saving}
             style={{
-              flex: 2, padding: "11px 0",
+              flex: 2,
+              padding: "11px 0",
               background: saving ? "#888" : "#661F1F",
-              border: "none", borderRadius: 10,
-              color: "#FFFFFF", fontWeight: 700, fontSize: 13,
+              border: "none",
+              borderRadius: 10,
+              color: "#FFFFFF",
+              fontWeight: 700,
+              fontSize: 13,
               cursor: saving ? "not-allowed" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              gap: 6, fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              fontFamily: "inherit",
             }}
           >
             <Save size={15} />

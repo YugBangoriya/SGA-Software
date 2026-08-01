@@ -1,583 +1,901 @@
-// SGA — Last updated: PAYMENT_METHOD_LABELS import added; legacy PARTIAL remapped to DEBIT in edit state init; backward compat for existing invoices
+// SGA — Last updated: Restored original inline edit panel; computeTotalPaid replaces inv.amountPaid in totalOutstanding, balanceDue, card Paid display, and openEdit init; totalPaid added to handleSave updates; Payment Breakdown section with inline AddPaymentEntryModal added below Save button
 // ============================================================
-// PendingPayments.jsx — Pending Payments Dashboard
+// PendingPayments.jsx — Pending Payments Dashboard (Owner / SuperAdmin)
 // Phase 4 — Shree Ganesh Automobile
 // ============================================================
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate }         from "react-router-dom";
 import {
-  ArrowLeft, IndianRupee, Phone, Car, Calendar,
-  ChevronRight, RefreshCw, CheckCircle2, AlertTriangle,
+  ArrowLeft, CreditCard, Check, AlertCircle, Calendar, ChevronDown, ChevronUp,
 } from "lucide-react";
-import useInvoiceStore from "../../store/invoiceStore";
-import useAuthStore from "../../store/authStore";
-import useThemeStore from "../../store/themeStore";
-import InvoiceStatusBadge from "../../components/invoices/InvoiceStatusBadge";
-import DBLockedBanner from "../../components/invoices/DBLockedBanner";
+import useInvoiceStore  from "../../store/invoiceStore";
+import useAuthStore     from "../../store/authStore";
+import useThemeStore    from "../../store/themeStore";
+import AddPaymentEntryModal from "../../components/invoices/AddPaymentEntryModal";
 import {
-  formatCurrency,
-  formatDate,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
+  requiresLoanFields,
   derivePaymentStatus,
+  formatCurrency,
+  computeTotalPaid,
 } from "../../lib/invoiceHelpers";
-
-const PENDING_STATUSES = ["UNPAID", "PARTIALLY_PAID", "EMI", "LOAN"];
 
 export default function PendingPayments() {
   const navigate = useNavigate();
-  const { firebaseUser: currentUser } = useAuthStore();
+
+  const { firebaseUser: currentUser, role } = useAuthStore();
   const { theme } = useThemeStore();
   const {
     pendingPaymentInvoices,
-    dbLocked, dbLockedBy,
-    subscribeInvoices, subscribeSystemConfig, loadSettings,
+    subscribeInvoices,
     updatePaymentStatus,
+    dbLocked,
+    subscribeSystemConfig,
   } = useInvoiceStore();
 
   const isDark = theme === "dark";
-  const bg = isDark ? "#1A1A1A" : "#CDCBC9";
-  const cardBg = isDark ? "#2A2A2A" : "#FFFFFF";
-  const border = isDark ? "#3A3A3A" : "#E8E2DF";
-  const textPrimary = isDark ? "#E8E8E8" : "#222222";
-  const textSecondary = isDark ? "#999999" : "#666666";
-  const inputBg = isDark ? "#1A1A1A" : "#F5F0EE";
+  const isOwnerOrAbove = ["owner", "superadmin"].includes(role);
 
-  // Which card is expanded for editing
-  const [expandedId, setExpandedId] = useState(null);
-  // Per-card edit state
-  const [editState, setEditState] = useState({});
-  const [savingId, setSavingId] = useState(null);
-  const [successId, setSuccessId] = useState(null);
+  const bg            = isDark ? "#1A1A1A" : "#CDCBC9";
+  const cardBg        = isDark ? "#2A2A2A" : "#FFFFFF";
+  const border        = isDark ? "#3A3A3A" : "#E8E2DF";
+  const textPrimary   = isDark ? "#E8E8E8" : "#222222";
+  const textSecondary = isDark ? "#999999" : "#666666";
+  const inputBg       = isDark ? "#2A2A2A" : "#FFFFFF";
+  const sectionBg     = isDark ? "#1A1A1A" : "#F5F0EE";
+
+  // ── Local state ──────────────────────────────────────────
+  const [expandedId, setExpandedId]   = useState(null);
+  const [editState,  setEditState]    = useState({});
+  const [savingId,   setSavingId]     = useState(null);
+  const [saveErrors, setSaveErrors]   = useState({});
+  const [saved,      setSaved]        = useState({});
+
+  // Which invoice's AddPaymentEntryModal is open (inline mode)
+  const [showEntryModalId, setShowEntryModalId] = useState(null);
 
   useEffect(() => {
-    const unsubConfig = subscribeSystemConfig();
-    loadSettings();
-    const unsubInvoices = subscribeInvoices("owner");
-    return () => {
-      if (unsubConfig) unsubConfig();
-      if (unsubInvoices) unsubInvoices();
-    };
+    subscribeSystemConfig();
+    subscribeInvoices();
   }, []);
 
-  // Total outstanding balance
+  if (!isOwnerOrAbove) {
+    navigate("/unauthorized");
+    return null;
+  }
+
+  // ── Summary ──────────────────────────────────────────────
+  // computeTotalPaid is backward-compat: reads from paymentEntries[] if present,
+  // falls back to inv.amountPaid for legacy invoices.
   const totalOutstanding = pendingPaymentInvoices.reduce((sum, inv) => {
-    return sum + Math.max(0, (inv.totalAmount || 0) - (inv.amountPaid || 0));
+    return sum + Math.max(0, (inv.totalAmount || 0) - computeTotalPaid(inv));
   }, 0);
 
-  // ── Open update panel ───────────────────────────────
+  // ── Edit helpers ─────────────────────────────────────────
   const openEdit = (inv) => {
-    setExpandedId(inv.id);
-    // Remap legacy "PARTIAL" value (pre-Debit rename) to "DEBIT" so the
-    // payment method button-group highlights correctly during editing.
-    const method = inv.paymentMethod === "PARTIAL" ? "DEBIT" : (inv.paymentMethod || "CASH");
     setEditState((prev) => ({
       ...prev,
       [inv.id]: {
-        paymentMethod: method,
-        amountPaid: inv.amountPaid ?? 0,
-        loanProvider: inv.loanProvider || "",
-        emiAmount: inv.emiAmount || "",
-        loanCompletionDate: inv.loanCompletionDate || "",
-        paymentNote: inv.paymentNote || "",
+        paymentMethod:      inv.paymentMethod      || "CASH",
+        // Use computeTotalPaid so the field shows the actual amount paid
+        // (which may be higher than inv.amountPaid if additional entries exist)
+        amountPaid:         computeTotalPaid(inv),
+        loanProvider:       inv.loanProvider       || "",
+        emiAmount:          inv.emiAmount           || "",
+        loanCompletionDate: inv.loanCompletionDate  || "",
+        paymentNote:        inv.paymentNote         || "",
       },
     }));
+    setExpandedId(inv.id);
+    // Close any open entry modal when switching invoices
+    setShowEntryModalId(null);
   };
 
-  const updateEdit = (id, field, value) => {
+  const closeEdit = (invId) => {
+    setExpandedId(null);
+    setSaveErrors((prev) => { const n = { ...prev }; delete n[invId]; return n; });
+    setSaved((prev) => { const n = { ...prev }; delete n[invId]; return n; });
+    setShowEntryModalId(null);
+  };
+
+  const updateEdit = (invId, field, value) => {
     setEditState((prev) => ({
       ...prev,
-      [id]: { ...prev[id], [field]: value },
+      [invId]: { ...prev[invId], [field]: value },
     }));
   };
 
-  // ── Save payment update ─────────────────────────────
+  // ── Save ─────────────────────────────────────────────────
   const handleSave = async (inv) => {
     setSavingId(inv.id);
     const edit = editState[inv.id];
+    if (!edit) { setSavingId(null); return; }
+
+    const newAmountPaid = parseFloat(edit.amountPaid) || 0;
     const newStatus = derivePaymentStatus(
       edit.paymentMethod,
-      edit.amountPaid,
-      inv.totalAmount
+      newAmountPaid,
+      inv.totalAmount || 0
     );
+
     try {
       await updatePaymentStatus(
         inv.id,
         {
-          paymentMethod: edit.paymentMethod,
-          amountPaid: parseFloat(edit.amountPaid) || 0,
-          paymentStatus: newStatus,
-          loanProvider: edit.loanProvider || null,
-          emiAmount: edit.emiAmount ? parseFloat(edit.emiAmount) : null,
+          paymentMethod:      edit.paymentMethod,
+          amountPaid:         newAmountPaid,
+          paymentStatus:      newStatus,
+          loanProvider:       edit.loanProvider       || null,
+          emiAmount:          edit.emiAmount ? parseFloat(edit.emiAmount) : null,
           loanCompletionDate: edit.loanCompletionDate || null,
-          paymentNote: edit.paymentNote || null,
+          paymentNote:        edit.paymentNote        || null,
+          // Write totalPaid for the new multi-entry schema
+          totalPaid:          newAmountPaid,
         },
         currentUser
       );
-      setSuccessId(inv.id);
-      setTimeout(() => setSuccessId(null), 3000);
-      setExpandedId(null);
+      setSaved((prev) => ({ ...prev, [inv.id]: true }));
+      setSaveErrors((prev) => { const n = { ...prev }; delete n[inv.id]; return n; });
+      setTimeout(() => {
+        setSaved((prev) => { const n = { ...prev }; delete n[inv.id]; return n; });
+        closeEdit(inv.id);
+      }, 1400);
     } catch (err) {
-      alert("Failed to update: " + err.message);
+      setSaveErrors((prev) => ({ ...prev, [inv.id]: err.message || "Save failed." }));
     } finally {
       setSavingId(null);
     }
   };
 
-  // ── Status summary chips ────────────────────────────
-  const counts = PENDING_STATUSES.reduce((acc, s) => {
-    acc[s] = pendingPaymentInvoices.filter((inv) => inv.paymentStatus === s).length;
-    return acc;
-  }, {});
-
-  const STATUS_CHIP_COLORS = {
-    UNPAID: { bg: "#FFEBEE", color: "#CC0000", border: "#FFCDD2" },
-    PARTIALLY_PAID: { bg: "#FFF3E0", color: "#CC6600", border: "#FFE0B2" },
-    EMI: { bg: "#E3F2FD", color: "#0055CC", border: "#BBDEFB" },
-    LOAN: { bg: "#E3F2FD", color: "#0055CC", border: "#BBDEFB" },
-  };
-
+  // ── Style helpers ─────────────────────────────────────────
   const inputStyle = {
     width: "100%",
-    padding: "9px 11px",
+    padding: "10px 12px",
     border: `1.5px solid ${border}`,
-    borderRadius: 7,
-    background: isDark ? "#2A2A2A" : "#FFFFFF",
+    borderRadius: 8,
+    background: inputBg,
     color: textPrimary,
-    fontSize: 13,
+    fontSize: 14,
     outline: "none",
     fontFamily: "inherit",
     boxSizing: "border-box",
   };
 
+  const labelStyle = {
+    fontSize: 11,
+    fontWeight: 600,
+    color: textSecondary,
+    display: "block",
+    marginBottom: 5,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    fontFamily: "Arial, sans-serif",
+  };
+
+  const fieldGroup = { marginBottom: 12 };
+
   return (
     <div style={{ minHeight: "100vh", background: bg, paddingBottom: 60 }}>
-      {/* ── Header ──────────────────────────────────── */}
+
+      {/* ── Header ────────────────────────────────────────── */}
       <div
         style={{
           background: "#661F1F",
-          padding: "16px 18px",
+          padding: "14px 18px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
           position: "sticky",
           top: 0,
           zIndex: 40,
           boxShadow: "0 2px 12px rgba(0,0,0,0.2)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-          <button
-            onClick={() => navigate("/invoices")}
-            style={{
-              background: "rgba(255,255,255,0.15)",
-              border: "none", borderRadius: 8,
-              padding: 7, cursor: "pointer",
-              color: "#FFFFFF", display: "flex",
-            }}
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h1 style={{ color: "#FFFFFF", fontSize: 20, fontWeight: 700, margin: 0 }}>
-              Pending Payments
-            </h1>
-            <div style={{ color: "#F0BABA", fontSize: 11, marginTop: 2, fontFamily: "Arial, sans-serif" }}>
-              {pendingPaymentInvoices.length} invoice{pendingPaymentInvoices.length !== 1 ? "s" : ""} outstanding
-            </div>
-          </div>
-        </div>
-
-        {/* Outstanding total */}
-        <div
+        <button
+          onClick={() => navigate(-1)}
           style={{
-            background: "rgba(255,255,255,0.12)",
-            borderRadius: 10,
-            padding: "12px 14px",
+            background: "rgba(255,255,255,0.15)",
+            border: "none",
+            borderRadius: 8,
+            padding: 6,
+            cursor: "pointer",
+            color: "#FFFFFF",
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            backdropFilter: "blur(4px)",
           }}
         >
-          <div style={{ color: "#F0BABA", fontSize: 12, fontFamily: "Arial, sans-serif" }}>
-            Total Outstanding Balance
+          <ArrowLeft size={18} />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: "#FFFFFF", fontSize: 16, fontWeight: 700 }}>
+            Pending Payments
           </div>
-          <div
-            style={{
-              color: "#FFFFFF",
-              fontSize: 20,
-              fontWeight: 700,
-              fontFamily: "'Courier New', monospace",
-            }}
-          >
-            {formatCurrency(totalOutstanding)}
+          <div style={{ color: "rgba(255,220,200,0.8)", fontSize: 11, marginTop: 1, fontFamily: "Arial, sans-serif" }}>
+            {pendingPaymentInvoices.length} invoice{pendingPaymentInvoices.length !== 1 ? "s" : ""} with outstanding balance
           </div>
         </div>
       </div>
 
-      <div style={{ padding: "16px", maxWidth: 640, margin: "0 auto" }}>
-        {dbLocked && <DBLockedBanner lockedBy={dbLockedBy} />}
+      <div style={{ padding: "16px", maxWidth: 680, margin: "0 auto" }}>
 
-        {!dbLocked && (
-          <>
-            {/* ── Status summary chips ─────────────────── */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              {PENDING_STATUSES.map((s) => {
-                const sc = STATUS_CHIP_COLORS[s];
-                const label = s === "PARTIALLY_PAID" ? "Partial" : s;
-                return (
-                  <div
-                    key={s}
-                    style={{
-                      background: sc.bg,
-                      border: `1px solid ${sc.border}`,
-                      borderRadius: 8,
-                      padding: "7px 12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      minWidth: 68,
-                    }}
-                  >
-                    <div style={{ fontSize: 18, fontWeight: 700, color: sc.color }}>
-                      {counts[s]}
-                    </div>
-                    <div style={{ fontSize: 10, color: sc.color, fontFamily: "Arial, sans-serif", fontWeight: 600, letterSpacing: 0.3 }}>
-                      {label}
-                    </div>
-                  </div>
-                );
-              })}
+        {/* ── Summary card ──────────────────────────────────── */}
+        <div
+          style={{
+            background: "#F5E6E6",
+            border: "1.5px solid #E8C8C8",
+            borderRadius: 14,
+            padding: "16px 20px",
+            marginBottom: 20,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif" }}>
+              Total Outstanding
             </div>
+            <div
+              style={{
+                fontSize: 26,
+                fontWeight: 700,
+                color: "#661F1F",
+                fontFamily: "'Courier New', monospace",
+                marginTop: 2,
+              }}
+            >
+              {formatCurrency(totalOutstanding)}
+            </div>
+          </div>
+          <AlertCircle size={32} color="#CC0000" style={{ opacity: 0.35 }} />
+        </div>
 
-            {/* ── Invoice cards ────────────────────────── */}
-            {pendingPaymentInvoices.length === 0 ? (
+        {/* ── DB locked warning ─────────────────────────────── */}
+        {dbLocked && (
+          <div
+            style={{
+              background: "#FFEBEE",
+              border: "1.5px solid #FFCDD2",
+              borderRadius: 10,
+              padding: "12px 14px",
+              marginBottom: 16,
+              fontSize: 13,
+              color: "#CC0000",
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <AlertCircle size={16} />
+            Invoice database is locked. Payment updates are temporarily disabled.
+          </div>
+        )}
+
+        {/* ── Empty state ───────────────────────────────────── */}
+        {pendingPaymentInvoices.length === 0 && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "48px 24px",
+              background: cardBg,
+              borderRadius: 14,
+              border: `1px solid ${border}`,
+            }}
+          >
+            <Check size={40} color="#1A7A1A" style={{ marginBottom: 12 }} />
+            <div style={{ fontSize: 16, fontWeight: 700, color: textPrimary, marginBottom: 6 }}>
+              All cleared!
+            </div>
+            <div style={{ fontSize: 13, color: textSecondary }}>
+              No invoices with pending or partial payments.
+            </div>
+          </div>
+        )}
+
+        {/* ── Invoice cards ─────────────────────────────────── */}
+        {pendingPaymentInvoices.map((inv) => {
+          const isExpanded = expandedId === inv.id;
+          const edit       = editState[inv.id] || {};
+          const isSaving   = savingId === inv.id;
+          const isSaved    = saved[inv.id];
+          const saveError  = saveErrors[inv.id];
+
+          // Use computeTotalPaid to get the actual total paid (from entries or legacy field)
+          const actualTotalPaid = computeTotalPaid(inv);
+          const balanceDue = Math.max(0, (inv.totalAmount || 0) - actualTotalPaid);
+
+          const statusColor =
+            inv.paymentStatus === "PARTIALLY PAID" ? "#CC6600"
+            : inv.paymentStatus === "EMI"          ? "#0055CC"
+            : inv.paymentStatus === "LOAN"         ? "#0055CC"
+            : "#CC0000";
+
+          const statusBg =
+            inv.paymentStatus === "PARTIALLY PAID" ? "#FFF3E0"
+            : inv.paymentStatus === "EMI"          ? "#E3F2FD"
+            : inv.paymentStatus === "LOAN"         ? "#E3F2FD"
+            : "#FFEBEE";
+
+          return (
+            <div
+              key={inv.id}
+              style={{
+                background: cardBg,
+                border: `1.5px solid ${isExpanded ? "#661F1F" : border}`,
+                borderRadius: 14,
+                marginBottom: 14,
+                overflow: "hidden",
+                transition: "border-color 0.2s",
+                boxShadow: isExpanded ? "0 4px 16px rgba(102,31,31,0.12)" : "0 2px 8px rgba(0,0,0,0.05)",
+              }}
+            >
+              {/* ── Card header ───────────────────────── */}
               <div
-                style={{
-                  textAlign: "center",
-                  padding: "56px 20px",
-                  background: cardBg,
-                  borderRadius: 14,
-                  border: `1.5px dashed ${border}`,
-                  color: textSecondary,
-                }}
+                style={{ padding: "14px 16px", cursor: "pointer" }}
+                onClick={() => isExpanded ? closeEdit(inv.id) : openEdit(inv)}
               >
-                <CheckCircle2 size={42} color="#4CAF50" style={{ marginBottom: 12 }} />
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#1A7A1A" }}>
-                  All Caught Up!
-                </div>
-                <div style={{ fontSize: 13, marginTop: 6 }}>
-                  No outstanding payments at the moment.
-                </div>
-              </div>
-            ) : (
-              pendingPaymentInvoices.map((inv) => {
-                const balanceDue = Math.max(0, (inv.totalAmount || 0) - (inv.amountPaid || 0));
-                const isExpanded = expandedId === inv.id;
-                const edit = editState[inv.id] || {};
-                const isSuccess = successId === inv.id;
-
-                return (
-                  <div
-                    key={inv.id}
-                    style={{
-                      background: cardBg,
-                      border: `1.5px solid ${isSuccess ? "#4CAF50" : isExpanded ? "#661F1F" : border}`,
-                      borderRadius: 12,
-                      marginBottom: 12,
-                      overflow: "hidden",
-                      boxShadow: isExpanded
-                        ? "0 4px 18px rgba(102,31,31,0.14)"
-                        : "0 2px 8px rgba(0,0,0,0.06)",
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    {/* Card summary row */}
+                {/* Top row: invoice no + status badge + chevron */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    marginBottom: 10,
+                  }}
+                >
+                  <div>
                     <div
-                      style={{ padding: "14px 16px", cursor: "pointer" }}
-                      onClick={() =>
-                        isExpanded ? setExpandedId(null) : openEdit(inv)
-                      }
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#661F1F",
+                        fontFamily: "'Courier New', monospace",
+                      }}
                     >
-                      {/* Top: invoice no + badge */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <span
-                          style={{
-                            fontFamily: "'Courier New', monospace",
-                            fontWeight: 700,
-                            fontSize: 13,
-                            color: "#661F1F",
-                          }}
-                        >
-                          {inv.invoiceNo}
-                          {inv.isDateOverridden && (
-                            <span style={{ marginLeft: 6, background: "#FFF3E0", color: "#CC6600", fontSize: 9, padding: "1px 5px", borderRadius: 4, fontFamily: "Arial, sans-serif", fontWeight: 700, border: "1px solid #FFB74D" }}>M</span>
-                          )}
-                        </span>
-                        <InvoiceStatusBadge invoice={inv} size="xs" />
-                      </div>
-
-                      {/* Customer name */}
-                      <div style={{ fontSize: 15, fontWeight: 700, color: textPrimary, marginBottom: 4 }}>
-                        {inv.customerSnapshot?.name || "—"}
-                      </div>
-
-                      {/* Vehicle + phone row */}
-                      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
-                        {inv.vehicleSnapshot?.registrationNo && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <Car size={12} color={textSecondary} />
-                            <span style={{ fontSize: 12, color: textSecondary }}>
-                              {inv.vehicleSnapshot.registrationNo}
-                            </span>
-                          </div>
-                        )}
-                        {inv.customerSnapshot?.phone && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <Phone size={12} color={textSecondary} />
-                            <span style={{ fontSize: 12, color: textSecondary }}>
-                              {inv.customerSnapshot.phone}
-                            </span>
-                          </div>
-                        )}
-                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                          <Calendar size={12} color={inv.isDateOverridden ? "#CC6600" : textSecondary} />
-                          <span style={{ fontSize: 12, color: inv.isDateOverridden ? "#CC6600" : textSecondary }}>
-                            {formatDate(inv.invoiceDate || inv.createdAt)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Amount row */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ display: "flex", gap: 16 }}>
-                          <div>
-                            <div style={{ fontSize: 10, color: textSecondary, fontFamily: "Arial, sans-serif", marginBottom: 1 }}>Total</div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary, fontFamily: "'Courier New', monospace" }}>
-                              {formatCurrency(inv.totalAmount || 0)}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: textSecondary, fontFamily: "Arial, sans-serif", marginBottom: 1 }}>Paid</div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
-                              {formatCurrency(inv.amountPaid || 0)}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: "#CC0000", fontFamily: "Arial, sans-serif", marginBottom: 1, fontWeight: 700 }}>Due</div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "#CC0000", fontFamily: "'Courier New', monospace" }}>
-                              {formatCurrency(balanceDue)}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          {isSuccess && (
-                            <CheckCircle2 size={18} color="#1A7A1A" />
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/invoices/${inv.id}`);
-                            }}
-                            style={{
-                              background: "none", border: `1px solid ${border}`,
-                              borderRadius: 6, padding: "5px 8px", cursor: "pointer",
-                              fontSize: 11, color: textSecondary, fontFamily: "inherit",
-                              display: "flex", alignItems: "center", gap: 3,
-                            }}
-                          >
-                            View <ChevronRight size={12} />
-                          </button>
-                          <div
-                            style={{
-                              background: isExpanded ? "#661F1F" : inputBg,
-                              borderRadius: 6, padding: "5px 8px",
-                              border: `1px solid ${isExpanded ? "#661F1F" : border}`,
-                              cursor: "pointer",
-                              display: "flex", alignItems: "center", gap: 3,
-                              fontSize: 11, fontWeight: 700,
-                              color: isExpanded ? "#FFFFFF" : "#661F1F",
-                            }}
-                          >
-                            <RefreshCw size={12} />
-                            Update
-                          </div>
-                        </div>
-                      </div>
+                      {inv.invoiceNo || inv.id}
                     </div>
-
-                    {/* ── Expanded Edit Panel ───────────── */}
-                    {isExpanded && (
-                      <div
-                        style={{
-                          borderTop: `1px solid ${border}`,
-                          padding: "16px",
-                          background: isDark ? "#1A1A1A" : "#F5F0EE",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif", marginBottom: 12 }}>
-                          Update Payment Status
-                        </div>
-
-                        {/* Payment method */}
-                        <div style={{ marginBottom: 12 }}>
-                          <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>
-                            Payment Method
-                          </div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {PAYMENT_METHODS.map((m) => (
-                              <button
-                                key={m.value}
-                                onClick={() => updateEdit(inv.id, "paymentMethod", m.value)}
-                                style={{
-                                  padding: "6px 12px", borderRadius: 7,
-                                  border: `1.5px solid ${edit.paymentMethod === m.value ? "#661F1F" : border}`,
-                                  background: edit.paymentMethod === m.value ? "#661F1F" : "none",
-                                  color: edit.paymentMethod === m.value ? "#FFFFFF" : textPrimary,
-                                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                                }}
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Amount paid */}
-                        {edit.paymentMethod !== "LOAN" && edit.paymentMethod !== "EMI" && (
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>
-                              Amount Paid
-                            </div>
-                            <div style={{ position: "relative" }}>
-                              <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "#661F1F", fontWeight: 700, fontSize: 14, pointerEvents: "none" }}>₹</span>
-                              <input
-                                type="number" min={0} max={inv.totalAmount} step={0.01}
-                                value={edit.amountPaid}
-                                onChange={(e) => updateEdit(inv.id, "amountPaid", e.target.value)}
-                                style={{ ...inputStyle, paddingLeft: 26, fontFamily: "'Courier New', monospace" }}
-                                onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                                onBlur={(e) => (e.target.style.borderColor = border)}
-                              />
-                            </div>
-                            {/* Quick fill */}
-                            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                              <button onClick={() => updateEdit(inv.id, "amountPaid", inv.totalAmount)} style={{ padding: "3px 9px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}>
-                                Full ({formatCurrency(inv.totalAmount)})
-                              </button>
-                              <button onClick={() => updateEdit(inv.id, "amountPaid", balanceDue)} style={{ padding: "3px 9px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}>
-                                Balance ({formatCurrency(balanceDue)})
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Loan/EMI fields */}
-                        {(edit.paymentMethod === "LOAN" || edit.paymentMethod === "EMI") && (
-                          <>
-                            <div style={{ marginBottom: 10 }}>
-                              <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>Provider</div>
-                              <input
-                                placeholder="Finance provider name"
-                                value={edit.loanProvider}
-                                onChange={(e) => updateEdit(inv.id, "loanProvider", e.target.value)}
-                                style={inputStyle}
-                                onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                                onBlur={(e) => (e.target.style.borderColor = border)}
-                              />
-                            </div>
-                            {edit.paymentMethod === "EMI" && (
-                              <div style={{ marginBottom: 10 }}>
-                                <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>EMI / Month (₹)</div>
-                                <input
-                                  type="number" min={0}
-                                  value={edit.emiAmount}
-                                  onChange={(e) => updateEdit(inv.id, "emiAmount", e.target.value)}
-                                  style={{ ...inputStyle, fontFamily: "'Courier New', monospace" }}
-                                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                                  onBlur={(e) => (e.target.style.borderColor = border)}
-                                />
-                              </div>
-                            )}
-                            <div style={{ marginBottom: 10 }}>
-                              <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>Est. Completion Date</div>
-                              <input
-                                type="date"
-                                value={edit.loanCompletionDate}
-                                onChange={(e) => updateEdit(inv.id, "loanCompletionDate", e.target.value)}
-                                style={inputStyle}
-                                onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                                onBlur={(e) => (e.target.style.borderColor = border)}
-                              />
-                            </div>
-                          </>
-                        )}
-
-                        {/* Payment note */}
-                        <div style={{ marginBottom: 14 }}>
-                          <div style={{ fontSize: 11, color: textSecondary, fontWeight: 600, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3, fontFamily: "Arial, sans-serif" }}>Note (optional)</div>
-                          <input
-                            placeholder="e.g. Cash received on 15th..."
-                            value={edit.paymentNote}
-                            onChange={(e) => updateEdit(inv.id, "paymentNote", e.target.value)}
-                            style={inputStyle}
-                            onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
-                            onBlur={(e) => (e.target.style.borderColor = border)}
-                          />
-                        </div>
-
-                        {/* New status preview */}
-                        {edit.paymentMethod && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-                            <span style={{ fontSize: 12, color: textSecondary }}>New status:</span>
-                            <InvoiceStatusBadge
-                              invoice={derivePaymentStatus(
-                                edit.paymentMethod,
-                                edit.amountPaid,
-                                inv.totalAmount
-                              )}
-                              size="sm"
-                            />
-                          </div>
-                        )}
-
-                        {/* Save / Cancel */}
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button
-                            onClick={() => setExpandedId(null)}
-                            style={{
-                              flex: 1, padding: "10px 0", background: "none",
-                              border: `1.5px solid ${border}`, borderRadius: 8,
-                              color: textPrimary, fontSize: 13, fontWeight: 600,
-                              cursor: "pointer", fontFamily: "inherit",
-                            }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => handleSave(inv)}
-                            disabled={savingId === inv.id}
-                            style={{
-                              flex: 2, padding: "10px 0",
-                              background: savingId === inv.id ? "#888" : "#661F1F",
-                              border: "none", borderRadius: 8,
-                              color: "#FFFFFF", fontSize: 13, fontWeight: 700,
-                              cursor: savingId === inv.id ? "not-allowed" : "pointer",
-                              fontFamily: "inherit",
-                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                            }}
-                          >
-                            <CheckCircle2 size={15} />
-                            {savingId === inv.id ? "Saving..." : "Save Payment Update"}
-                          </button>
-                        </div>
+                    <div style={{ fontSize: 12, color: textSecondary, marginTop: 2 }}>
+                      {inv.customerSnapshot?.name || "Unknown Customer"}
+                    </div>
+                    {inv.customerSnapshot?.phone && (
+                      <div style={{ fontSize: 11, color: textSecondary, marginTop: 1 }}>
+                        {inv.customerSnapshot.phone}
                       </div>
                     )}
                   </div>
-                );
-              })
-            )}
-          </>
-        )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span
+                      style={{
+                        background: statusBg,
+                        color: statusColor,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "3px 8px",
+                        borderRadius: 99,
+                        border: `1px solid ${statusColor}33`,
+                        fontFamily: "Arial, sans-serif",
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {inv.paymentStatus}
+                    </span>
+                    {isExpanded
+                      ? <ChevronUp size={16} color={textSecondary} />
+                      : <ChevronDown size={16} color={textSecondary} />
+                    }
+                  </div>
+                </div>
+
+                {/* Amount row: total / paid / due */}
+                <div style={{ display: "flex", gap: 0 }}>
+                  {[
+                    {
+                      label: "Total",
+                      value: formatCurrency(inv.totalAmount || 0),
+                      color: textPrimary,
+                    },
+                    {
+                      label: "Paid",
+                      value: formatCurrency(actualTotalPaid),
+                      color: "#1A7A1A",
+                    },
+                    {
+                      label: "Due",
+                      value: formatCurrency(balanceDue),
+                      color: "#CC0000",
+                    },
+                  ].map(({ label, value, color }, idx, arr) => (
+                    <div
+                      key={label}
+                      style={{
+                        flex: 1,
+                        paddingRight: idx < arr.length - 1 ? 8 : 0,
+                        borderRight: idx < arr.length - 1 ? `1px solid ${border}` : "none",
+                        marginRight: idx < arr.length - 1 ? 8 : 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: textSecondary,
+                          fontFamily: "Arial, sans-serif",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.3,
+                        }}
+                      >
+                        {label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color,
+                          fontFamily: "'Courier New', monospace",
+                        }}
+                      >
+                        {value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Date + method row */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    marginTop: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <Calendar size={12} color={textSecondary} />
+                    <span style={{ fontSize: 11, color: textSecondary }}>
+                      {inv.invoiceDate
+                        ? new Date(inv.invoiceDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                        : "—"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <CreditCard size={12} color={textSecondary} />
+                    <span style={{ fontSize: 11, color: textSecondary }}>
+                      {inv.paymentMethod || "—"}
+                    </span>
+                  </div>
+                  {inv.loanCompletionDate && (
+                    <div style={{ fontSize: 11, color: "#CC6600" }}>
+                      Due:{" "}
+                      {new Date(inv.loanCompletionDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Expanded edit panel ───────────────── */}
+              {isExpanded && edit && (
+                <div
+                  style={{
+                    borderTop: `1.5px solid #661F1F`,
+                    padding: "16px",
+                    background: sectionBg,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#661F1F",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      marginBottom: 14,
+                      fontFamily: "Arial, sans-serif",
+                    }}
+                  >
+                    Update Payment
+                  </div>
+
+                  {/* Payment method */}
+                  <div style={fieldGroup}>
+                    <label style={labelStyle}>Payment Method</label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {PAYMENT_METHODS.map((m) => (
+                        <button
+                          key={m.value}
+                          onClick={() => updateEdit(inv.id, "paymentMethod", m.value)}
+                          style={{
+                            padding: "7px 12px",
+                            borderRadius: 7,
+                            border: `1.5px solid ${edit.paymentMethod === m.value ? "#661F1F" : border}`,
+                            background: edit.paymentMethod === m.value ? "#661F1F" : inputBg,
+                            color: edit.paymentMethod === m.value ? "#FFFFFF" : textPrimary,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Amount paid */}
+                  {edit.paymentMethod !== "LOAN" && edit.paymentMethod !== "EMI" && (
+                    <div style={fieldGroup}>
+                      <label style={labelStyle}>Amount Paid</label>
+                      <div style={{ position: "relative" }}>
+                        <span
+                          style={{
+                            position: "absolute",
+                            left: 12,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            fontSize: 16,
+                            color: "#661F1F",
+                            fontWeight: 700,
+                            pointerEvents: "none",
+                          }}
+                        >
+                          ₹
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={inv.totalAmount || 0}
+                          step={0.01}
+                          value={edit.amountPaid}
+                          onChange={(e) => updateEdit(inv.id, "amountPaid", e.target.value)}
+                          placeholder={`0 – ${inv.totalAmount || 0}`}
+                          style={{
+                            ...inputStyle,
+                            paddingLeft: 28,
+                            fontFamily: "'Courier New', monospace",
+                          }}
+                          onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                          onBlur={(e) => (e.target.style.borderColor = border)}
+                        />
+                      </div>
+                      {/* Quick fill buttons */}
+                      <div style={{ display: "flex", gap: 6, marginTop: 7, flexWrap: "wrap" }}>
+                        <button
+                          onClick={() => updateEdit(inv.id, "amountPaid", 0)}
+                          style={{ padding: "3px 9px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                        >
+                          ₹0
+                        </button>
+                        <button
+                          onClick={() => updateEdit(inv.id, "amountPaid", inv.totalAmount)}
+                          style={{ padding: "3px 9px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                        >
+                          Full ({formatCurrency(inv.totalAmount)})
+                        </button>
+                        <button
+                          onClick={() => updateEdit(inv.id, "amountPaid", balanceDue)}
+                          style={{ padding: "3px 9px", borderRadius: 99, border: `1px solid ${border}`, background: "none", color: textSecondary, fontSize: 11, cursor: "pointer" }}
+                        >
+                          Balance ({formatCurrency(balanceDue)})
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Loan/EMI fields */}
+                  {requiresLoanFields(edit.paymentMethod) && (
+                    <div
+                      style={{
+                        background: "#E3F2FD",
+                        border: "1.5px solid #90CAF9",
+                        borderRadius: 10,
+                        padding: "12px",
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#0055CC", marginBottom: 10 }}>
+                        {edit.paymentMethod === "EMI" ? "EMI Details" : "Loan Details"}
+                      </div>
+                      <div style={fieldGroup}>
+                        <label style={{ ...labelStyle, color: "#0055CC" }}>Provider</label>
+                        <input
+                          placeholder="e.g. HDFC Bank, Bajaj Finance…"
+                          value={edit.loanProvider || ""}
+                          onChange={(e) => updateEdit(inv.id, "loanProvider", e.target.value)}
+                          style={{ ...inputStyle, borderColor: "#90CAF9" }}
+                          onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                          onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
+                        />
+                      </div>
+                      {edit.paymentMethod === "EMI" && (
+                        <div style={fieldGroup}>
+                          <label style={{ ...labelStyle, color: "#0055CC" }}>EMI Amount / Month</label>
+                          <div style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#0055CC", fontWeight: 700, pointerEvents: "none" }}>₹</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={100}
+                              value={edit.emiAmount || ""}
+                              onChange={(e) => updateEdit(inv.id, "emiAmount", e.target.value)}
+                              style={{ ...inputStyle, paddingLeft: 28, borderColor: "#90CAF9", fontFamily: "'Courier New', monospace" }}
+                              onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                              onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div style={fieldGroup}>
+                        <label style={{ ...labelStyle, color: "#0055CC" }}>Expected Completion</label>
+                        <input
+                          type="date"
+                          value={edit.loanCompletionDate || ""}
+                          onChange={(e) => updateEdit(inv.id, "loanCompletionDate", e.target.value)}
+                          style={{ ...inputStyle, borderColor: "#90CAF9" }}
+                          onFocus={(e) => (e.target.style.borderColor = "#0055CC")}
+                          onBlur={(e) => (e.target.style.borderColor = "#90CAF9")}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Balance due (live) */}
+                  {edit.paymentMethod !== "LOAN" && edit.paymentMethod !== "EMI" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        padding: "9px 12px",
+                        background:
+                          Math.max(0, (inv.totalAmount || 0) - (parseFloat(edit.amountPaid) || 0)) > 0
+                            ? (isDark ? "#2A1A1A" : "#FFEBEE")
+                            : (isDark ? "#1A2A1A" : "#E8F5E9"),
+                        borderRadius: 8,
+                        marginBottom: 12,
+                        border: `1px solid ${
+                          Math.max(0, (inv.totalAmount || 0) - (parseFloat(edit.amountPaid) || 0)) > 0
+                            ? "#FFCDD2"
+                            : "#C8E6C9"
+                        }`,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color:
+                            Math.max(0, (inv.totalAmount || 0) - (parseFloat(edit.amountPaid) || 0)) > 0
+                              ? "#CC0000"
+                              : "#1A7A1A",
+                        }}
+                      >
+                        Updated Balance Due
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color:
+                            Math.max(0, (inv.totalAmount || 0) - (parseFloat(edit.amountPaid) || 0)) > 0
+                              ? "#CC0000"
+                              : "#1A7A1A",
+                          fontFamily: "'Courier New', monospace",
+                        }}
+                      >
+                        {formatCurrency(
+                          Math.max(0, (inv.totalAmount || 0) - (parseFloat(edit.amountPaid) || 0))
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Payment note */}
+                  <div style={fieldGroup}>
+                    <label style={labelStyle}>Payment Note (optional)</label>
+                    <input
+                      placeholder="e.g. Remaining balance collected via UPI…"
+                      value={edit.paymentNote || ""}
+                      onChange={(e) => updateEdit(inv.id, "paymentNote", e.target.value)}
+                      style={inputStyle}
+                      onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                      onBlur={(e) => (e.target.style.borderColor = border)}
+                    />
+                  </div>
+
+                  {/* Error */}
+                  {saveError && (
+                    <div
+                      style={{
+                        background: "#FFEBEE",
+                        border: "1px solid #FFCDD2",
+                        borderRadius: 8,
+                        padding: "8px 12px",
+                        marginBottom: 10,
+                        fontSize: 12,
+                        color: "#CC0000",
+                      }}
+                    >
+                      ⚠ {saveError}
+                    </div>
+                  )}
+
+                  {/* Save / Cancel */}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => closeEdit(inv.id)}
+                      style={{
+                        flex: 1,
+                        padding: "10px 0",
+                        background: "none",
+                        border: `1.5px solid ${border}`,
+                        borderRadius: 10,
+                        color: textPrimary,
+                        fontWeight: 600,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleSave(inv)}
+                      disabled={isSaving || dbLocked}
+                      style={{
+                        flex: 2,
+                        padding: "10px 0",
+                        background: isSaved ? "#1A7A1A" : isSaving ? "#888" : "#661F1F",
+                        border: "none",
+                        borderRadius: 10,
+                        color: "#FFFFFF",
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: isSaving || dbLocked ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        fontFamily: "inherit",
+                        transition: "background 0.2s",
+                      }}
+                    >
+                      {isSaved ? (
+                        <><Check size={15} /> Saved!</>
+                      ) : isSaving ? (
+                        "Saving…"
+                      ) : (
+                        <><Check size={15} /> Save Payment Update</>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* ── Payment Breakdown (if entries exist) ─── */}
+                  {Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 0 && (
+                    <>
+                      <div
+                        style={{
+                          height: 1,
+                          background: border,
+                          margin: "14px 0 12px",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: textSecondary,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                          fontFamily: "Arial, sans-serif",
+                          marginBottom: 8,
+                        }}
+                      >
+                        Payment Breakdown
+                      </div>
+                      {inv.paymentEntries.map((entry, idx) => (
+                        <div
+                          key={entry.id || idx}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "5px 0",
+                            borderBottom:
+                              idx < inv.paymentEntries.length - 1
+                                ? `1px solid ${border}`
+                                : "none",
+                          }}
+                        >
+                          <span style={{ fontSize: 12, color: textPrimary }}>
+                            {PAYMENT_METHOD_LABELS[entry.method] || entry.method}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "#1A7A1A",
+                              fontFamily: "'Courier New', monospace",
+                            }}
+                          >
+                            {formatCurrency(entry.amount)}
+                          </span>
+                        </div>
+                      ))}
+
+                      <button
+                        onClick={() => setShowEntryModalId(inv.id)}
+                        style={{
+                          marginTop: 10,
+                          padding: "7px 14px",
+                          background: "none",
+                          border: `1.5px dashed ${border}`,
+                          borderRadius: 8,
+                          color: "#661F1F",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          width: "100%",
+                        }}
+                      >
+                        + Add Another Payment Method
+                      </button>
+
+                      {/* Inline AddPaymentEntryModal */}
+                      {showEntryModalId === inv.id && (
+                        <AddPaymentEntryModal
+                          invoice={inv}
+                          inline={true}
+                          onClose={() => setShowEntryModalId(null)}
+                          onSuccess={() => setShowEntryModalId(null)}
+                          darkMode={isDark}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Quick view below card (collapsed) ─── */}
+              {!isExpanded && (
+                <div
+                  style={{
+                    borderTop: `1px solid ${border}`,
+                    padding: "10px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: textSecondary }}>
+                    {inv.invoiceDate
+                      ? new Date(inv.invoiceDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                      : ""}
+                    {inv.vehicleSnapshot?.registrationNo
+                      ? ` · ${inv.vehicleSnapshot.registrationNo}`
+                      : ""}
+                  </div>
+                  <button
+                    onClick={() => openEdit(inv)}
+                    disabled={dbLocked}
+                    style={{
+                      padding: "6px 14px",
+                      background: dbLocked ? (isDark ? "#333" : "#E0D8D4") : "#661F1F",
+                      border: "none",
+                      borderRadius: 8,
+                      color: "#FFFFFF",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: dbLocked ? "not-allowed" : "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Update Payment
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

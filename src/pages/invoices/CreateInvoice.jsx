@@ -1,4 +1,4 @@
-// SGA — Last updated: Added isUnnamed to DEFAULT_FORM; canAdvance allows unnamed customers at step 1; onChange passed to InvoiceStepReview; unnamed customer auto-creates record on submit if name/phone edited
+// SGA — Last updated: Restored original step-indicator UI and card wrapper; updated handleSubmit to build paymentEntries[] + totalPaid; added additionalPaymentEntries to DEFAULT_FORM
 // ============================================================
 // CreateInvoice.jsx — 5-Step Invoice Creation Wizard
 // Phase 4 — Shree Ganesh Automobile
@@ -18,7 +18,7 @@ import InvoiceStepLabour from "../../components/invoices/InvoiceStepLabour";
 import InvoiceStepPayment from "../../components/invoices/InvoiceStepPayment";
 import InvoiceStepReview from "../../components/invoices/InvoiceStepReview";
 import DBLockedBanner from "../../components/invoices/DBLockedBanner";
-import { derivePaymentStatus } from "../../lib/invoiceHelpers";
+import { derivePaymentStatus, buildPaymentEntry } from "../../lib/invoiceHelpers";
 import { createCustomer } from "../../lib/customerService";
 
 // Default placeholder values — must match InvoiceStepCustomer.jsx + InvoiceStepReview.jsx
@@ -26,11 +26,11 @@ const UNNAMED_NAME_DEFAULT = "Cash Memo - Unnamed Customer";
 const UNNAMED_PHONE_DEFAULT = "XXXXX-XXXXX";
 
 const STEPS = [
-  { id: 1, label: "Customer", icon: User, description: "Select customer" },
-  { id: 2, label: "Items", icon: Package, description: "Add line items" },
-  { id: 3, label: "Labour", icon: Wrench, description: "Labour charges" },
-  { id: 4, label: "Payment", icon: CreditCard, description: "Payment details" },
-  { id: 5, label: "Review", icon: CheckCircle, description: "Review & submit" },
+  { id: 1, label: "Customer", icon: User,         description: "Select customer"   },
+  { id: 2, label: "Items",    icon: Package,      description: "Add line items"    },
+  { id: 3, label: "Labour",   icon: Wrench,       description: "Labour charges"    },
+  { id: 4, label: "Payment",  icon: CreditCard,   description: "Payment details"   },
+  { id: 5, label: "Review",   icon: CheckCircle,  description: "Review & submit"   },
 ];
 
 const DEFAULT_FORM = {
@@ -56,6 +56,8 @@ const DEFAULT_FORM = {
   preDiscountTotal: 0,
   discountAmount: 0,
   totalAmount: 0,
+  // Additional payment entries from the inline form in InvoiceStepPayment
+  additionalPaymentEntries: [],
 };
 
 export default function CreateInvoice() {
@@ -122,8 +124,6 @@ export default function CreateInvoice() {
   };
 
   // ── Submit ───────────────────────────────────────────────
-  // If isUnnamed and the customer name or phone was edited away from the
-  // defaults, auto-create a customer record and link it to this invoice.
   const handleSubmit = async () => {
     if (!currentUser) {
       setSubmitError("Authentication error. Please log out and log in again.");
@@ -133,10 +133,12 @@ export default function CreateInvoice() {
     setSubmitError(null);
 
     try {
-      let finalForm = { ...form };
-
       // ── Unnamed customer: check if name/phone was changed ──
-      if (form.isUnnamed) {
+      let customerId = form.customerId;
+      let customerSnapshot = { ...(form.customerSnapshot || {}) };
+      let isUnnamed = form.isUnnamed;
+
+      if (isUnnamed) {
         const snap = form.customerSnapshot || {};
         const nameChanged = snap.name && snap.name !== UNNAMED_NAME_DEFAULT;
         const phoneChanged = snap.phone && snap.phone !== UNNAMED_PHONE_DEFAULT;
@@ -163,19 +165,91 @@ export default function CreateInvoice() {
             customFields: {},
             createdBy: currentUser.uid,
           });
-          // Link the newly created customer
-          finalForm = {
-            ...finalForm,
-            customerId: newCustomerId,
-            isUnnamed: false,
-          };
+          customerId = newCustomerId;
+          customerSnapshot = { ...customerSnapshot, id: newCustomerId };
+          isUnnamed = false;
         }
       }
 
-      const invoiceId = await createInvoice(finalForm, currentUser);
+      // ── Build paymentEntries from wizard form ─────────────
+      // The wizard collects an initial payment via the flat fields
+      // (paymentMethod + amountPaid). We convert this to the first entry in
+      // paymentEntries[]. Additional entries come from the inline form in
+      // InvoiceStepPayment (form.additionalPaymentEntries).
+      const initialAmount = parseFloat(form.amountPaid || 0);
+      const paymentEntries = [];
+
+      // Only create an entry when there is actual money paid upfront.
+      // LOAN and EMI invoices have no upfront cash — leave entries empty.
+      if (
+        initialAmount > 0 &&
+        !["LOAN", "EMI"].includes(form.paymentMethod)
+      ) {
+        paymentEntries.push(
+          buildPaymentEntry({
+            amount:    initialAmount,
+            method:    form.paymentMethod,
+            date:      form.invoiceDate,
+            reference: form.paymentNote || "",
+            currentUser,
+          })
+        );
+      }
+
+      // Spread in any additional entries recorded via the inline form
+      const additionalEntries = (form.additionalPaymentEntries || []).map((e) =>
+        buildPaymentEntry({
+          amount:    e.amount,
+          method:    e.method,
+          date:      form.invoiceDate,
+          reference: e.reference || "",
+          currentUser,
+        })
+      );
+      paymentEntries.push(...additionalEntries);
+
+      const totalPaid = paymentEntries.reduce((sum, e) => sum + e.amount, 0);
+
+      const paymentStatus = derivePaymentStatus(
+        form.paymentMethod,
+        totalPaid,
+        form.totalAmount
+      );
+
+      const invoiceData = {
+        customerId,
+        customerSnapshot,
+        vehicleSnapshot:    form.vehicleSnapshot,
+        isUnnamed,
+        items:              form.items,
+        labourCost:         parseFloat(form.labourCost || 0),
+        invoiceDate:        form.invoiceDate,
+        dueDate:            form.dueDate || "",
+        isDateOverridden:   form.isDateOverridden || false,
+        gstEnabled:         form.gstEnabled || false,
+        subtotal:           form.subtotal    || 0,
+        cgst:               form.cgst        || 0,
+        sgst:               form.sgst        || 0,
+        preDiscountTotal:   form.preDiscountTotal || 0,
+        discountAmount:     form.discountAmount   || 0,
+        totalAmount:        form.totalAmount      || 0,
+        // New payment model
+        paymentEntries,
+        totalPaid,
+        paymentStatus,
+        // Legacy flat fields — kept for backward compat with PDF / reporting
+        paymentMethod:      form.paymentMethod,
+        amountPaid:         initialAmount,
+        paymentNote:        form.paymentNote || "",
+        loanProvider:       form.loanProvider || "",
+        emiAmount:          form.emiAmount ? parseFloat(form.emiAmount) : null,
+        loanCompletionDate: form.loanCompletionDate || "",
+      };
+
+      const invoiceId = await createInvoice(invoiceData, currentUser);
       navigate(`/invoices/${invoiceId}?created=true`);
     } catch (err) {
-      setSubmitError(err.message);
+      setSubmitError(err.message || "Failed to create invoice. Please try again.");
       setSubmitting(false);
     }
   };

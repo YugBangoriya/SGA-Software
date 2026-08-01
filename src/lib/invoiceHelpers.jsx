@@ -1,14 +1,4 @@
-// SGA — Last updated: PAYMENT_METHODS: PARTIAL renamed to DEBIT (auto-zero amount on select); PAYMENT_METHOD_LABELS map added for display; requiresPartialFields updated for backward compat
-// of truth for logo resolution. It imports LOGO_BASE64 directly and guarantees it
-// always returns a valid base64 logo string (either the fetched/converted Firebase
-// Storage URL, or the embedded LOGO_BASE64 fallback). InvoicePDF.jsx and
-// ReturnInvoicePDF.jsx retain their || LOGO_BASE64 safety-net but it is now
-// unreachable under normal operation — the fallback is handled here first.
-//
-// This resolves the "Bugs Found But Not Fixed" note from the previous session:
-// the previous enrichSettingsWithLogo() returned null on fetch failure, which
-// relied on the PDF component's || LOGO_BASE64 to recover. That indirection is
-// now replaced — this function never returns null for businessLogoUrl.
+// SGA — Last updated: Multi-method payment support — added computeTotalPaid (backward-compat shim), buildPaymentEntry factory, BANK_TRANSFER to PAYMENT_METHODS and PAYMENT_METHOD_LABELS; derivePaymentStatus signature unchanged, all callers now pass computeTotalPaid result
 // ============================================================
 // invoiceHelpers.jsx — Invoice utility functions
 // Phase 4 — Shree Ganesh Automobile
@@ -21,9 +11,6 @@ import ReturnInvoicePDFDocument from "../components/invoices/ReturnInvoicePDF";
 
 // Embedded fallback logo — used when no businessLogoUrl is set in Settings,
 // or when the Firebase Storage fetch fails (CORS / network error).
-// Must be imported here (not only in the PDF components) so enrichSettingsWithLogo()
-// can use it as the guaranteed fallback without the PDF component needing to know
-// whether the upstream enrichment succeeded.
 import LOGO_BASE64 from "../assets/logo_base64";
 
 // ── Currency formatter ─────────────────────────────────────
@@ -78,7 +65,6 @@ export const calculateGST = (subtotal) => {
 };
 
 // ── Invoice totals calculator ──────────────────────────────
-// SUPPORTS: discount field (flat rupee amount, applied after GST calculation)
 export const calculateTotals = ({
   items = [],
   labourCost = 0,
@@ -117,25 +103,38 @@ export const PAYMENT_STATUS_LABELS = {
   LOAN:           "Loan",
 };
 
+// ── Payment methods ────────────────────────────────────────
+// BANK_TRANSFER added for multi-method payment support.
 export const PAYMENT_METHODS = [
-  { value: "CASH",   label: "Cash" },
-  { value: "UPI",    label: "UPI" },
-  { value: "CARD",   label: "Card" },
-  { value: "LOAN",   label: "Loan" },
-  { value: "EMI",    label: "EMI" },
-  { value: "DEBIT",  label: "Debit" },
+  { value: "CASH",          label: "Cash" },
+  { value: "UPI",           label: "UPI" },
+  { value: "CARD",          label: "Card" },
+  { value: "BANK_TRANSFER", label: "Bank Transfer" },
+  { value: "LOAN",          label: "Loan" },
+  { value: "EMI",           label: "EMI" },
+  { value: "DEBIT",         label: "Debit" },
+];
+
+// Payment methods valid for individual entries (excludes LOAN/EMI which are
+// invoice-level financing arrangements, not individual cash transactions).
+export const ENTRY_PAYMENT_METHODS = [
+  { value: "CASH",          label: "Cash" },
+  { value: "UPI",           label: "UPI" },
+  { value: "CARD",          label: "Card" },
+  { value: "BANK_TRANSFER", label: "Bank Transfer" },
+  { value: "DEBIT",         label: "Debit" },
 ];
 
 // Human-readable labels for display in InvoiceDetail, PendingPayments, etc.
-// Includes backward-compat entry for legacy "PARTIAL" invoices already in Firestore.
 export const PAYMENT_METHOD_LABELS = {
-  CASH:    "Cash",
-  UPI:     "UPI",
-  CARD:    "Card",
-  LOAN:    "Loan",
-  EMI:     "EMI",
-  DEBIT:   "Debit",
-  PARTIAL: "Partial Payment", // legacy — invoices created before the Debit rename
+  CASH:          "Cash",
+  UPI:           "UPI",
+  CARD:          "Card",
+  BANK_TRANSFER: "Bank Transfer",
+  LOAN:          "Loan",
+  EMI:           "EMI",
+  DEBIT:         "Debit",
+  PARTIAL:       "Partial Payment", // legacy — invoices created before the Debit rename
 };
 
 // Return invoice payment methods — no loan/emi for returns
@@ -146,10 +145,65 @@ export const RETURN_PAYMENT_METHODS = [
 ];
 
 export const requiresLoanFields    = (method) => ["LOAN", "EMI"].includes(method);
-// PARTIAL kept for backward compat with pre-Debit invoices already in Firestore
 export const requiresPartialFields = (method) => method === "PARTIAL" || method === "DEBIT";
 
+// ── computeTotalPaid — backward-compat shim ────────────────
+// Single source of truth for "how much has been paid on this invoice."
+//
+// Priority order (critical — do not change):
+//
+//  1. invoice.totalPaid  — the denormalised sum written atomically by
+//     createInvoice, addPaymentEntry, and deletePaymentEntry. This is the
+//     most reliable value because it correctly accounts for the migration
+//     scenario: an old invoice (amountPaid: 10000, no paymentEntries) receives
+//     its first new entry (25000). addPaymentEntry computes newTotalPaid = 35000
+//     and writes paymentEntries: [25000] + totalPaid: 35000 atomically. If we
+//     summed paymentEntries first we would return 25000 — wrong. totalPaid
+//     always reflects the true cumulative paid amount.
+//
+//  2. sum of paymentEntries[] — used only when totalPaid is absent (e.g. a
+//     brand-new invoice document read from the listener before the createInvoice
+//     write fully propagates, which is extremely rare in practice).
+//
+//  3. invoice.amountPaid  — legacy scalar on pre-entries invoices that have
+//     never had a payment entry recorded against them.
+//
+// Call this everywhere instead of `invoice.amountPaid` directly.
+export const computeTotalPaid = (invoice) => {
+  if (!invoice) return 0;
+
+  // Priority 1 — denormalised totalPaid (set by every write that touches payments)
+  if (invoice.totalPaid != null) return parseFloat(invoice.totalPaid || 0);
+
+  // Priority 2 — sum entries array (new invoice not yet propagated, very rare)
+  if (Array.isArray(invoice.paymentEntries) && invoice.paymentEntries.length > 0) {
+    return parseFloat(
+      invoice.paymentEntries
+        .reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
+        .toFixed(2)
+    );
+  }
+
+  // Priority 3 — legacy scalar amountPaid (pre-entries invoices with no writes yet)
+  return parseFloat(invoice.amountPaid || 0);
+};
+
+// ── buildPaymentEntry — factory ────────────────────────────
+// Creates a validated payment entry object ready to be appended to
+// an invoice's paymentEntries[] array.
+export const buildPaymentEntry = ({ amount, method, date, reference = "", currentUser = null }) => ({
+  id:          crypto.randomUUID(),
+  amount:      parseFloat(amount || 0),
+  method:      method || "CASH",
+  date:        date || new Date().toISOString().split("T")[0],
+  reference:   (reference || "").trim(),
+  recordedBy:  currentUser?.uid   || "",
+  recordedByName: currentUser?.displayName || currentUser?.email || "",
+});
+
 // ── Derive paymentStatus from method + amounts ─────────────
+// Signature is intentionally unchanged. All callers should now pass
+// computeTotalPaid(invoice) as the amountPaid argument.
 export const derivePaymentStatus = (method, amountPaid, totalAmount) => {
   if (method === "LOAN") return "LOAN";
   if (method === "EMI")  return "EMI";
@@ -168,43 +222,8 @@ export const isReturnInvoice = (invoice) =>
 // ══════════════════════════════════════════════════════════════════════════════
 //  LOGO PRE-FETCH — SINGLE SOURCE OF TRUTH
 // ══════════════════════════════════════════════════════════════════════════════
-//
-//  WHY THIS EXISTS
-//  ───────────────
-//  @react-pdf/renderer v4.x in browser environments cannot reliably fetch
-//  remote Firebase Storage URLs via its internal image loader due to CORS
-//  restrictions. When a Storage URL is passed directly to <Image src={url} />,
-//  the PDF renderer fails silently and renders a blank white box.
-//
-//  THE APPROACH
-//  ────────────
-//  Before generating any PDF, we call enrichSettingsWithLogo() which:
-//    1. Fetches the Firebase Storage URL using the browser's native fetch()
-//       (which respects CORS correctly for public Storage buckets).
-//    2. Converts the response to a base64 data URI via FileReader.
-//    3. Returns the enriched settings object where businessLogoUrl is now
-//       a "data:image/...;base64,..." string — safe to pass to any PDF renderer.
-//
-//  FALLBACK CHAIN
-//  ──────────────
-//    Remote URL fetched OK  → use fetched base64
-//    Remote URL fetch fails → use embedded LOGO_BASE64 (this file)
-//    No URL set in Settings → use embedded LOGO_BASE64 (this file)
-//
-//  This function is the SINGLE place that decides which logo to use.
-//  InvoicePDF.jsx and ReturnInvoicePDF.jsx both retain a || LOGO_BASE64 guard
-//  as a defence-in-depth safety net, but it is unreachable under normal
-//  operation because this function always resolves to a non-null base64 string.
-// ══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Fetches a remote image URL and returns a base64 data URI.
- * Returns null on any failure (CORS, network error, non-OK response).
- * If the URL is already a data URI, returns it unchanged.
- */
 async function fetchImageAsBase64(url) {
   if (!url || typeof url !== "string") return null;
-  // Already a data URI — no fetch needed
   if (url.startsWith("data:")) return url;
   try {
     const response = await fetch(url, { mode: "cors" });
@@ -217,7 +236,6 @@ async function fetchImageAsBase64(url) {
       reader.readAsDataURL(blob);
     });
   } catch {
-    // CORS / network failure — fall through to LOGO_BASE64 below
     console.warn(
       "[invoiceHelpers] Logo fetch failed (CORS / network). " +
       "Using embedded fallback logo for PDF."
@@ -226,54 +244,28 @@ async function fetchImageAsBase64(url) {
   }
 }
 
-/**
- * Returns a copy of businessSettings where businessLogoUrl is guaranteed to be
- * a valid base64 data URI (never a remote URL, never null).
- *
- * Fallback order:
- *   fetched base64 → LOGO_BASE64 (embedded)
- *
- * This is the only function that should be called before PDF generation.
- * Both generateAndDownloadPDF() and getPDFBlob() call this automatically.
- */
 async function enrichSettingsWithLogo(businessSettings) {
   const biz = businessSettings || {};
-
-  // No URL configured → use embedded logo
   if (!biz.businessLogoUrl) {
     return { ...biz, businessLogoUrl: LOGO_BASE64 };
   }
-
-  // Already a data URI (e.g. from a previous enrichment or a test) → pass through
   if (biz.businessLogoUrl.startsWith("data:")) {
     return biz;
   }
-
-  // Remote URL → fetch and convert; fall back to embedded on failure
   const base64 = await fetchImageAsBase64(biz.businessLogoUrl);
   return { ...biz, businessLogoUrl: base64 || LOGO_BASE64 };
 }
 
 // ── PDF generation & download ──────────────────────────────
-/**
- * Generates an invoice (or return invoice) PDF, triggers a browser download,
- * and returns the Blob.
- *
- * Calls enrichSettingsWithLogo() before rendering so the PDF always has a
- * valid logo source — no CORS / blank-box issues.
- */
 export const generateAndDownloadPDF = async (invoice, businessSettings) => {
   try {
     const enrichedSettings = await enrichSettingsWithLogo(businessSettings);
-
     const Component = isReturnInvoice(invoice)
       ? ReturnInvoicePDFDocument
       : InvoicePDFDocument;
-
     const blob = await pdf(
       <Component invoice={invoice} businessSettings={enrichedSettings} />
     ).toBlob();
-
     const url = URL.createObjectURL(blob);
     const a   = document.createElement("a");
     a.href     = url;
@@ -282,7 +274,6 @@ export const generateAndDownloadPDF = async (invoice, businessSettings) => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
     return blob;
   } catch (err) {
     console.error("PDF generation error:", err);
@@ -290,10 +281,6 @@ export const generateAndDownloadPDF = async (invoice, businessSettings) => {
   }
 };
 
-/**
- * Returns the invoice PDF as a Blob (used for WhatsApp upload).
- * Also calls enrichSettingsWithLogo() for the same reason as above.
- */
 export const getPDFBlob = async (invoice, businessSettings) => {
   const enrichedSettings = await enrichSettingsWithLogo(businessSettings);
   const Component = isReturnInvoice(invoice)

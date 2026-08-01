@@ -1,6 +1,4 @@
-// SGA — Last updated: Feature 2 — when invoice date is manually overridden (isDateOverridden),
-// the card now also shows the original creation date in muted text below the invoice date,
-// so staff can see both at a glance in the list view without opening the detail page.
+// SGA — Last updated: Multi-method payment support — balance due now computed via computeTotalPaid (backward-compat shim reading paymentEntries[] or legacy amountPaid); all card styling and colour logic unchanged
 // ============================================================
 // InvoiceCard.jsx — Invoice list card with status, date flag
 // Phase 4 — Shree Ganesh Automobile
@@ -8,13 +6,13 @@
 
 import { Car, Phone, Calendar, IndianRupee, ChevronRight } from "lucide-react";
 import InvoiceStatusBadge from "./InvoiceStatusBadge";
-import { formatCurrency, formatDate, getDisplayStatus } from "../../lib/invoiceHelpers";
+import { formatCurrency, formatDate, getDisplayStatus, computeTotalPaid } from "../../lib/invoiceHelpers";
 
 // ── Color scheme for return invoices (existing) ─────────────────────────
 // Light: soft rose background  #FDF6F6 / border #EDD8D8
 // Dark:  dark rose             #2A2020 / border #4A2828
 
-// ── Color scheme for partial/pending-payment invoices (NEW) ─────────────
+// ── Color scheme for partial/pending-payment invoices ───────────────────
 // Uses a cool teal/blue tone — clearly distinct from the warm rose of returns
 // Light: soft sky-blue background  #F0F7FF / border #C8DFFF
 // Dark:  dark steel blue           #1A2433 / border #2A3D55
@@ -23,13 +21,13 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
   const displayStatus = getDisplayStatus(invoice);
   const isDark = darkMode;
 
+  // computeTotalPaid reads paymentEntries[] if present, else falls back to amountPaid
+  const totalPaid  = computeTotalPaid(invoice);
+  const balanceDue = Math.max(0, (invoice.totalAmount || 0) - totalPaid);
+
   // Determine if this invoice has a pending / partial payment
   const isPendingPayment = ["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"].includes(invoice.paymentStatus)
-    && invoice.status === "APPROVED";  // Only approved invoices with pending payment get the tint
-
-  // Return invoices: warm rose tint (existing behaviour, unchanged)
-  // Partial-payment invoices: cool teal-blue tint (new)
-  // Normal invoices: plain white / dark card
+    && invoice.status === "APPROVED";
 
   let cardBackground, cardBorder;
 
@@ -93,7 +91,6 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
             {invoice.invoiceNo}
           </span>
 
-          {/* RETURN badge — shown on return invoices */}
           {isReturn && (
             <span
               style={{
@@ -112,7 +109,6 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
             </span>
           )}
 
-          {/* PARTIAL / PENDING badge — shown on pending-payment invoices that are NOT return invoices */}
           {isPendingPayment && !isReturn && (
             <span
               style={{
@@ -131,7 +127,6 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
             </span>
           )}
 
-          {/* Date override indicator */}
           {invoice.isDateOverridden && (
             <span
               style={{
@@ -211,17 +206,17 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
         </div>
       </div>
 
-      {/* Pending payment balance row */}
+      {/* Pending payment balance row — uses computeTotalPaid for accuracy */}
       {["PARTIALLY_PAID", "UNPAID", "EMI", "LOAN"].includes(displayStatus) && (
         <div
           style={{
-            background:    isPendingPayment ? "#E8F0FF" : (displayStatus === "UNPAID" ? "#FFEBEE" : "#FFF3E0"),
-            borderRadius:  6,
-            padding:       "6px 10px",
-            display:       "flex",
+            background:     isPendingPayment ? "#E8F0FF" : (displayStatus === "UNPAID" ? "#FFEBEE" : "#FFF3E0"),
+            borderRadius:   6,
+            padding:        "6px 10px",
+            display:        "flex",
             justifyContent: "space-between",
-            alignItems:    "center",
-            border:        `1px solid ${isPendingPayment ? "#C0D4F8" : (displayStatus === "UNPAID" ? "#FFCDD2" : "#FFE0B2")}`,
+            alignItems:     "center",
+            border:         `1px solid ${isPendingPayment ? "#C0D4F8" : (displayStatus === "UNPAID" ? "#FFCDD2" : "#FFE0B2")}`,
           }}
         >
           <span style={{ fontSize: 11, color: "#666", fontFamily: "Arial, sans-serif" }}>
@@ -235,9 +230,7 @@ export default function InvoiceCard({ invoice, onClick, darkMode, isReturn }) {
               fontFamily: "'Courier New', monospace",
             }}
           >
-            {formatCurrency(
-              Math.max(0, (invoice.totalAmount || 0) - (invoice.amountPaid || 0))
-            )}
+            {formatCurrency(balanceDue)}
           </span>
         </div>
       )}

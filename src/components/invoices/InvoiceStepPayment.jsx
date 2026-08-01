@@ -1,18 +1,18 @@
-// SGA — Last updated: Bug fix — useEffect on mount pushes computed totalAmount to parent form so invoices are never saved with totalAmount=0; DEBIT payment method auto-sets amountPaid to 0
+// SGA — Last updated: Restored original labels (Amount Paid, Payment Note); added additionalPaymentEntries inline section below Balance Due row; updated balanceDue to subtract additionalTotal
 // ============================================================
 // InvoiceStepPayment.jsx — Step 4: Payment Details + GST + Discount + Date
 // Phase 4 — Shree Ganesh Automobile
 // ============================================================
 
 import { useState, useEffect } from "react";
-import { Calendar, Info, Tag, Check } from "lucide-react";
+import { Calendar, Info, Tag, Check, X } from "lucide-react";
 import {
   PAYMENT_METHODS,
+  ENTRY_PAYMENT_METHODS,
   requiresLoanFields,
   derivePaymentStatus,
   calculateTotals,
   formatCurrency,
-  toISODateString,
 } from "../../lib/invoiceHelpers";
 
 const GST_RATE = 0.09;
@@ -43,6 +43,12 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
     !!(data.discountAmount && data.discountAmount > 0)
   );
 
+  // Additional payment entry local state
+  const [showAddEntry, setShowAddEntry] = useState(false);
+  const [newEntryMethod, setNewEntryMethod] = useState("CASH");
+  const [newEntryAmount, setNewEntryAmount] = useState("");
+  const [newEntryRef, setNewEntryRef] = useState("");
+
   // Recompute totals with current discount
   const baseTotals = calculateTotals({ items, labourCost });
   const subtotal = baseTotals.subtotal;
@@ -52,17 +58,17 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
 
   const confirmedDiscount = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
   const totalAmount = parseFloat(Math.max(0, preDiscountTotal - confirmedDiscount).toFixed(2));
-  const balanceDue = Math.max(0, totalAmount - (parseFloat(amountPaid) || 0));
+
+  // Additional entries total
+  const additionalTotal = (data.additionalPaymentEntries || []).reduce(
+    (s, e) => s + parseFloat(e.amount || 0), 0
+  );
+
+  // Balance due accounts for primary + additional payments
+  const balanceDue = Math.max(0, totalAmount - (parseFloat(amountPaid) || 0) - additionalTotal);
   const paymentStatus = derivePaymentStatus(paymentMethod, amountPaid, totalAmount);
 
   // ── BUG FIX: Push computed totals to the parent form immediately on mount.
-  // Without this, if the user arrives at step 4 without changing any payment
-  // field (e.g. Cash is already selected by default), the parent form's
-  // totalAmount stays at 0 from DEFAULT_FORM and the invoice is saved with
-  // totalAmount=0. That causes derivePaymentStatus to return "PAID" even when
-  // the customer only paid a partial amount (0 paid → PAID because 0 >= 0),
-  // which hides the invoice from the pending-payment / backup-protection logic.
-  // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const disc = discountConfirmed ? parseFloat(discountDraft || 0) : 0;
     const initialTotal = parseFloat(Math.max(0, preDiscountTotal - disc).toFixed(2));
@@ -115,6 +121,10 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
       updates.loanProvider = "";
       updates.emiAmount = "";
       updates.loanCompletionDate = "";
+      // Clear additional entries when switching to LOAN/EMI — they don't apply
+      if (value === "LOAN" || value === "EMI") {
+        updates.additionalPaymentEntries = [];
+      }
     }
 
     if (field === "invoiceDate") {
@@ -140,6 +150,31 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
     setDiscountConfirmed(false);
     pushTotals(0);
   };
+
+  // ── Additional entry handlers ────────────────────────────
+  const handleAddEntry = () => {
+    const amt = parseFloat(newEntryAmount);
+    if (!amt || amt <= 0) return;
+    const existing = data.additionalPaymentEntries || [];
+    onChange({
+      additionalPaymentEntries: [
+        ...existing,
+        { method: newEntryMethod, amount: amt, reference: newEntryRef },
+      ],
+    });
+    setNewEntryAmount("");
+    setNewEntryRef("");
+    setNewEntryMethod("CASH");
+    setShowAddEntry(false);
+  };
+
+  const handleRemoveEntry = (idx) => {
+    const existing = data.additionalPaymentEntries || [];
+    onChange({ additionalPaymentEntries: existing.filter((_, i) => i !== idx) });
+  };
+
+  const entryLabel = (method) =>
+    ENTRY_PAYMENT_METHODS.find((m) => m.value === method)?.label || method;
 
   const inputStyle = {
     width: "100%",
@@ -690,6 +725,236 @@ export default function InvoiceStepPayment({ data, onChange, gstNumber, darkMode
           >
             {formatCurrency(balanceDue)}
           </span>
+        </div>
+      )}
+
+      {/* ── Additional Payment Entries ──────────────── */}
+      {paymentMethod !== "LOAN" && paymentMethod !== "EMI" && (
+        <div style={{ marginTop: 12 }}>
+          {/* List of existing additional entries */}
+          {(data.additionalPaymentEntries || []).length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              {(data.additionalPaymentEntries || []).map((entry, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    marginBottom: 6,
+                    background: isDark ? "#2A2A2A" : "#FFFFFF",
+                    border: `1px solid ${border}`,
+                    borderRadius: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: textPrimary }}>
+                      {entryLabel(entry.method)}
+                    </span>
+                    {entry.reference && (
+                      <span style={{ fontSize: 11, color: textSecondary }}>
+                        · {entry.reference}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#1A7A1A",
+                        fontFamily: "'Courier New', monospace",
+                      }}
+                    >
+                      {formatCurrency(entry.amount)}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveEntry(idx)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 3,
+                        color: "#CC0000",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Toggle: show inline form or "Add Another" button */}
+          {!showAddEntry ? (
+            <button
+              onClick={() => setShowAddEntry(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                padding: "8px 14px",
+                background: "none",
+                border: `1.5px dashed ${border}`,
+                borderRadius: 8,
+                color: "#661F1F",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                width: "100%",
+              }}
+            >
+              + Add Another Payment Method
+            </button>
+          ) : (
+            <div
+              style={{
+                background: isDark ? "#1A1A2A" : "#F0F4FF",
+                border: "1.5px solid #8B3A3A",
+                borderRadius: 10,
+                padding: "14px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#661F1F",
+                  marginBottom: 10,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.4,
+                  fontFamily: "Arial, sans-serif",
+                }}
+              >
+                Add Another Payment
+              </div>
+
+              {/* Method chips */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                {ENTRY_PAYMENT_METHODS.map((m) => (
+                  <button
+                    key={m.value}
+                    onClick={() => setNewEntryMethod(m.value)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 7,
+                      border: `1.5px solid ${newEntryMethod === m.value ? "#661F1F" : border}`,
+                      background: newEntryMethod === m.value ? "#661F1F" : inputBg,
+                      color: newEntryMethod === m.value ? "#FFFFFF" : textPrimary,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Amount */}
+              <div style={{ position: "relative", marginBottom: 8 }}>
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    fontSize: 16,
+                    color: "#661F1F",
+                    fontWeight: 700,
+                    pointerEvents: "none",
+                  }}
+                >
+                  ₹
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={balanceDue}
+                  step={0.01}
+                  value={newEntryAmount}
+                  onChange={(e) => setNewEntryAmount(e.target.value)}
+                  placeholder={`0 – ${formatCurrency(balanceDue)}`}
+                  style={{
+                    ...inputStyle,
+                    paddingLeft: 28,
+                    fontFamily: "'Courier New', monospace",
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                  onBlur={(e) => (e.target.style.borderColor = border)}
+                />
+              </div>
+
+              {/* Reference */}
+              <div style={{ marginBottom: 10 }}>
+                <input
+                  placeholder="Reference / note (optional)"
+                  value={newEntryRef}
+                  onChange={(e) => setNewEntryRef(e.target.value)}
+                  style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = "#661F1F")}
+                  onBlur={(e) => (e.target.style.borderColor = border)}
+                />
+              </div>
+
+              {/* Add / Cancel */}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setShowAddEntry(false);
+                    setNewEntryAmount("");
+                    setNewEntryRef("");
+                    setNewEntryMethod("CASH");
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "9px 0",
+                    background: "none",
+                    border: `1.5px solid ${border}`,
+                    borderRadius: 8,
+                    color: textPrimary,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddEntry}
+                  disabled={!newEntryAmount || parseFloat(newEntryAmount) <= 0}
+                  style={{
+                    flex: 2,
+                    padding: "9px 0",
+                    background:
+                      newEntryAmount && parseFloat(newEntryAmount) > 0
+                        ? "#661F1F"
+                        : isDark ? "#333" : "#CCC",
+                    border: "none",
+                    borderRadius: 8,
+                    color: "#FFFFFF",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor:
+                      newEntryAmount && parseFloat(newEntryAmount) > 0
+                        ? "pointer"
+                        : "not-allowed",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Add Payment
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

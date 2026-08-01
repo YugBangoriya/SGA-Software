@@ -1,4 +1,4 @@
-// SGA — Last updated: Smart Edit button — PENDING invoices route to /edit-items (EditPendingInvoice, full item editing) while APPROVED invoices route to /edit (EditInvoice, payment/date only). Edit-Items button also added inside the PENDING approval card for discoverability.
+// SGA — Last updated: Multi-method payment support — added payment history timeline, "Record Payment" button (AddPaymentEntryModal), delete entry handler, and computeTotalPaid for accurate balance calculations on all invoices (new entries model + legacy amountPaid backward-compat)
 // ============================================================
 // InvoiceDetail.jsx — View, reprint, resend, approve invoice
 // Phase 4 — Shree Ganesh Automobile
@@ -8,17 +8,18 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Download, Send, CheckCircle2, XCircle, Trash2,
-  Phone, Car, Package, CreditCard, Calendar, Edit, AlertTriangle,
+  Phone, Car, Package, CreditCard, Calendar, Edit, AlertTriangle, Plus,
 } from "lucide-react";
 import useInvoiceStore from "../../store/invoiceStore";
 import useAuthStore from "../../store/authStore";
 import useThemeStore from "../../store/themeStore";
 import InvoiceStatusBadge from "../../components/invoices/InvoiceStatusBadge";
 import DBLockedBanner from "../../components/invoices/DBLockedBanner";
+import AddPaymentEntryModal from "../../components/invoices/AddPaymentEntryModal";
 import {
   formatCurrency, formatDate, getDisplayStatus,
   generateAndDownloadPDF, sendInvoiceViaWhatsApp, isReturnInvoice,
-  PAYMENT_METHOD_LABELS,
+  PAYMENT_METHOD_LABELS, computeTotalPaid,
 } from "../../lib/invoiceHelpers";
 
 export default function InvoiceDetail() {
@@ -30,7 +31,7 @@ export default function InvoiceDetail() {
   const {
     currentInvoice, loadInvoice, dbLocked, dbLockedBy,
     businessSettings, approveInvoice, approveReturnInvoice, rejectInvoice,
-    deleteInvoice, subscribeSystemConfig, loadSettings,
+    deleteInvoice, deletePaymentEntry, subscribeSystemConfig, loadSettings,
     logPdfDownload, logWhatsAppSent, loading, error,
   } = useInvoiceStore();
 
@@ -44,9 +45,11 @@ export default function InvoiceDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [actionMsg, setActionMsg] = useState(justCreated ? "Invoice created successfully!" : null);
-  // FIX: Prevents stale global store error/invoice from flashing on first render.
-  // We always show a loading spinner until THIS mount's loadInvoice() has resolved.
   const [loadDone, setLoadDone] = useState(false);
+  // Payment entry management
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [confirmDeleteEntryId, setConfirmDeleteEntryId] = useState(null);
+  const [deletingEntryId, setDeletingEntryId] = useState(null);
 
   const bg = isDark ? "#1A1A1A" : "#CDCBC9";
   const cardBg = isDark ? "#2A2A2A" : "#FFFFFF";
@@ -69,6 +72,10 @@ export default function InvoiceDetail() {
 
   const inv = currentInvoice;
   const displayStatus = inv ? getDisplayStatus(inv) : null;
+
+  // Compute totals using backward-compat shim
+  const totalPaid  = inv ? computeTotalPaid(inv) : 0;
+  const balanceDue = inv ? Math.max(0, (inv.totalAmount || 0) - totalPaid) : 0;
 
   // ── PDF download ─────────────────────────────────────
   const handleDownloadPDF = async () => {
@@ -136,7 +143,7 @@ export default function InvoiceDetail() {
     }
   };
 
-  // ── Delete ────────────────────────────────────────────
+  // ── Delete invoice ─────────────────────────────────────
   const handleDelete = async () => {
     if (!currentUser) return;
     try {
@@ -147,16 +154,22 @@ export default function InvoiceDetail() {
     }
   };
 
+  // ── Delete a payment entry ─────────────────────────────
+  const handleDeleteEntry = async (entryId) => {
+    if (!currentUser || !entryId) return;
+    setDeletingEntryId(entryId);
+    try {
+      await deletePaymentEntry(id, entryId, currentUser);
+      setConfirmDeleteEntryId(null);
+    } catch (err) {
+      alert("Failed to delete payment entry: " + err.message);
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
   const SectionCard = ({ icon: Icon, title, children }) => (
-    <div
-      style={{
-        background: cardBg,
-        border: `1px solid ${border}`,
-        borderRadius: 12,
-        padding: "14px 16px",
-        marginBottom: 12,
-      }}
-    >
+    <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
         <Icon size={15} color="#661F1F" />
         <span style={{ fontSize: 12, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "Arial, sans-serif" }}>
@@ -176,8 +189,6 @@ export default function InvoiceDetail() {
     </div>
   );
 
-  // FIX: Show spinner until loadInvoice() for THIS mount has resolved.
-  // This prevents any stale global-store error from showing before the fetch completes.
   if (!loadDone || (loading && !inv)) {
     return (
       <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -190,10 +201,7 @@ export default function InvoiceDetail() {
     return (
       <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
         <div style={{ color: "#CC0000", fontSize: 14, fontFamily: "Arial, sans-serif" }}>{error}</div>
-        <button
-          onClick={() => { setLoadDone(false); loadInvoice(id).finally(() => setLoadDone(true)); }}
-          style={{ background: "#661F1F", color: "#FFF", border: "none", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontSize: 13 }}
-        >
+        <button onClick={() => { setLoadDone(false); loadInvoice(id).finally(() => setLoadDone(true)); }} style={{ background: "#661F1F", color: "#FFF", border: "none", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontSize: 13 }}>
           Try Again
         </button>
       </div>
@@ -202,20 +210,9 @@ export default function InvoiceDetail() {
 
   return (
     <div style={{ minHeight: "100vh", background: bg, paddingBottom: 100 }}>
+
       {/* ── Header ──────────────────────────────────── */}
-      <div
-        style={{
-          background: "#661F1F",
-          padding: "14px 18px",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          position: "sticky",
-          top: 0,
-          zIndex: 40,
-          boxShadow: "0 2px 12px rgba(0,0,0,0.2)",
-        }}
-      >
+      <div style={{ background: "#661F1F", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 40, boxShadow: "0 2px 12px rgba(0,0,0,0.2)" }}>
         <button onClick={() => navigate("/invoices")} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: 6, cursor: "pointer", color: "#FFFFFF", display: "flex" }}>
           <ArrowLeft size={18} />
         </button>
@@ -231,83 +228,51 @@ export default function InvoiceDetail() {
         </div>
         {isOwnerOrAbove && inv && (
           <button
-            onClick={() =>
-              // PENDING invoices → edit-items (full item/labour/payment edit before approval)
-              // Approved/other invoices → edit (payment-only edit, preserves inventory deduction)
-              navigate(inv.status === "PENDING"
-                ? `/invoices/${id}/edit-items`
-                : `/invoices/${id}/edit`
-              )
-            }
+            onClick={() => navigate(inv.status === "PENDING" ? `/invoices/${id}/edit-items` : `/invoices/${id}/edit`)}
             style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FFFFFF", display: "flex" }}
-            title={inv.status === "PENDING" ? "Edit invoice items before approving" : "Edit payment / date details"}
+            title={inv.status === "PENDING" ? "Edit invoice items before approving" : "Edit dates / GST / discount / loan details"}
           >
             <Edit size={16} />
           </button>
         )}
         {isOwnerOrAbove && inv && (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FFAAAA", display: "flex" }}
-          >
+          <button onClick={() => setConfirmDelete(true)} style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: 7, cursor: "pointer", color: "#FF8A8A", display: "flex" }} title="Delete Invoice">
             <Trash2 size={16} />
           </button>
         )}
       </div>
 
-      {/* ── Success message ──────────────────────────── */}
+      {/* ── Success / action banner ──────────────────── */}
       {actionMsg && (
-        <div
-          style={{
-            background: "#E8F5E9",
-            borderBottom: "1px solid #C8E6C9",
-            padding: "10px 18px",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
+        <div style={{ background: "#E8F5E9", borderBottom: "1px solid #C8E6C9", padding: "10px 18px", display: "flex", alignItems: "center", gap: 8 }}>
           <CheckCircle2 size={16} color="#1A7A1A" />
           <span style={{ fontSize: 13, fontWeight: 600, color: "#1A7A1A" }}>{actionMsg}</span>
         </div>
       )}
 
-      <div style={{ padding: "16px", maxWidth: 640, margin: "0 auto" }}>
-        {dbLocked && <DBLockedBanner lockedBy={dbLockedBy} />}
+      {/* ── DB Lock banner ───────────────────────────── */}
+      {dbLocked && (
+        <div style={{ padding: "12px 16px" }}>
+          <DBLockedBanner lockedBy={dbLockedBy} />
+        </div>
+      )}
 
+      <div style={{ padding: "12px 16px", maxWidth: 640, margin: "0 auto" }}>
         {inv && !dbLocked && (
           <>
-            {/* ── Pending approval actions ─────────────── */}
+            {/* ── PENDING approval card ─────────────────── */}
             {inv.status === "PENDING" && isOwnerOrAbove && (
-              <div
-                style={{
-                  background: isDark ? "#2A2218" : "#FFFAF0",
-                  border: "2px solid #FFD888",
-                  borderRadius: 12,
-                  padding: "14px",
-                  marginBottom: 14,
-                }}
-              >
+              <div style={{ background: "#FFF8E1", border: "1.5px solid #FFB74D", borderRadius: 12, padding: "16px", marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                   <AlertTriangle size={16} color="#CC6600" />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#CC6600" }}>
-                    Awaiting Your Approval
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#CC6600" }}>Awaiting Your Approval</span>
                 </div>
                 <p style={{ fontSize: 12, color: textSecondary, margin: "0 0 10px" }}>
                   Review the items below before approving. Approving will deduct the selected items from live inventory.
                 </p>
-                {/* Edit Items — visible for owner/superadmin before approval */}
                 <button
                   onClick={() => navigate(`/invoices/${id}/edit-items`)}
-                  style={{
-                    width: "100%", padding: "9px 0", marginBottom: 10,
-                    background: "none", border: "1.5px solid #CC6600",
-                    borderRadius: 8, color: "#CC6600", fontWeight: 700,
-                    fontSize: 13, cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    gap: 5, fontFamily: "inherit",
-                  }}
+                  style={{ width: "100%", padding: "9px 0", marginBottom: 10, background: "none", border: "1.5px solid #CC6600", borderRadius: 8, color: "#CC6600", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontFamily: "inherit" }}
                 >
                   <Edit size={14} />
                   Edit Items / Labour / Payment
@@ -337,9 +302,7 @@ export default function InvoiceDetail() {
             <SectionCard icon={Phone} title="Customer">
               <Row label="Name" value={inv.customerSnapshot?.name || "—"} bold />
               <Row label="Phone" value={inv.customerSnapshot?.phone || "—"} />
-              {inv.customerSnapshot?.alternatePhone && (
-                <Row label="Alt. Phone" value={inv.customerSnapshot.alternatePhone} />
-              )}
+              {inv.customerSnapshot?.alternatePhone && <Row label="Alt. Phone" value={inv.customerSnapshot.alternatePhone} />}
             </SectionCard>
 
             {/* ── Vehicle ──────────────────────────────── */}
@@ -373,8 +336,9 @@ export default function InvoiceDetail() {
               )}
             </SectionCard>
 
-            {/* ── Totals ───────────────────────────────── */}
+            {/* ── Totals & Payment ─────────────────────── */}
             <SectionCard icon={CreditCard} title="Totals & Payment">
+              {/* ── Subtotal / GST / Discount breakdown ── */}
               <Row label="Subtotal" value={formatCurrency(inv.subtotal || 0)} mono />
               {inv.gstEnabled && (
                 <>
@@ -383,7 +347,6 @@ export default function InvoiceDetail() {
                 </>
               )}
               <div style={{ borderTop: `1px solid ${border}`, paddingTop: 8, marginTop: 4 }}>
-                {/* Show discount breakdown if discount was applied */}
                 {parseFloat(inv.discountAmount || 0) > 0 ? (
                   <>
                     <Row label="Invoice Total" value={formatCurrency(inv.preDiscountTotal || inv.totalAmount || 0)} mono />
@@ -395,31 +358,97 @@ export default function InvoiceDetail() {
                 ) : (
                   <Row label="Total Amount" value={formatCurrency(inv.totalAmount || 0)} mono bold />
                 )}
-                <Row label="Amount Paid" value={formatCurrency(inv.amountPaid || 0)} mono green />
-                <Row
-                  label="Balance Due"
-                  value={formatCurrency(Math.max(0, (inv.totalAmount || 0) - (inv.amountPaid || 0)))}
-                  mono bold
-                  red={Math.max(0, (inv.totalAmount || 0) - (inv.amountPaid || 0)) > 0}
-                  green={Math.max(0, (inv.totalAmount || 0) - (inv.amountPaid || 0)) === 0}
-                />
               </div>
+
+              {/* ── Payment Records ─────────────────────── */}
+              <div style={{ borderTop: `1px solid ${border}`, paddingTop: 12, marginTop: 8 }}>
+                {Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 0 ? (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#661F1F", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, fontFamily: "Arial, sans-serif" }}>
+                      Payment Records ({inv.paymentEntries.length})
+                    </div>
+                    {inv.paymentEntries.map((entry, idx) => (
+                      <div key={entry.id || idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", background: isDark ? "#1A2A1A" : "#F0FFF4", borderRadius: 8, marginBottom: 6, border: `1px solid ${isDark ? "#2A3A2A" : "#C8E6C9"}` }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, color: textPrimary, fontWeight: 600 }}>
+                            {PAYMENT_METHOD_LABELS[entry.method] || entry.method}
+                          </div>
+                          <div style={{ fontSize: 11, color: textSecondary, marginTop: 2 }}>
+                            {entry.date ? new Date(entry.date + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                            {entry.reference ? ` · ${entry.reference}` : ""}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: "#1A7A1A", fontFamily: "'Courier New', monospace" }}>
+                          {formatCurrency(entry.amount)}
+                        </span>
+                        {isOwnerOrAbove && inv.status === "APPROVED" && (
+                          <button
+                            onClick={() => setConfirmDeleteEntryId(entry.id)}
+                            disabled={deletingEntryId === entry.id}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "#CC0000", display: "flex", opacity: deletingEntryId === entry.id ? 0.5 : 1 }}
+                            title="Delete this payment entry"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : parseFloat(inv.amountPaid || 0) > 0 ? (
+                  /* Legacy invoice — no paymentEntries array, show old flat field */
+                  <Row label="Amount Paid" value={formatCurrency(inv.amountPaid || 0)} mono green />
+                ) : null}
+
+                {/* Total Paid / Balance Due */}
+                <div style={{ marginTop: 8 }}>
+                  <Row label="Total Paid" value={formatCurrency(totalPaid)} mono green={totalPaid > 0} />
+                  <Row label="Balance Due" value={formatCurrency(balanceDue)} mono bold red={balanceDue > 0} green={balanceDue === 0} />
+                </div>
+              </div>
+
+              {/* ── Loan / EMI details ───────────────────── */}
               <div style={{ marginTop: 8 }}>
-                <Row label="Payment Method" value={PAYMENT_METHOD_LABELS[inv.paymentMethod] || inv.paymentMethod || "—"} />
-                {inv.loanProvider && <Row label="Provider" value={inv.loanProvider} />}
+                {inv.paymentMethod && (
+                  <Row label="Payment Arrangement" value={PAYMENT_METHOD_LABELS[inv.paymentMethod] || inv.paymentMethod || "—"} />
+                )}
+                {inv.loanProvider && <Row label="Loan Provider" value={inv.loanProvider} />}
                 {inv.emiAmount && <Row label="EMI / Month" value={formatCurrency(inv.emiAmount)} mono />}
                 {inv.loanCompletionDate && <Row label="Est. Completion" value={formatDate(inv.loanCompletionDate)} />}
-                {inv.paymentNote && <Row label="Note" value={inv.paymentNote} />}
+                {inv.paymentNote && <Row label="Invoice Note" value={inv.paymentNote} />}
               </div>
+
+              {/* ── Record Payment button ────────────────── */}
+              {isOwnerOrAbove && inv.status === "APPROVED" && balanceDue > 0 && (
+                <button
+                  onClick={() => setShowAddPayment(true)}
+                  style={{
+                    width: "100%",
+                    marginTop: 14,
+                    padding: "11px 0",
+                    background: "#1A7A1A",
+                    border: "none",
+                    borderRadius: 10,
+                    color: "#FFFFFF",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    fontFamily: "inherit",
+                    boxShadow: "0 2px 8px rgba(26,122,26,0.25)",
+                  }}
+                >
+                  <Plus size={15} />
+                  Record Payment ({formatCurrency(balanceDue)} remaining)
+                </button>
+              )}
             </SectionCard>
 
-            {/* ── Invoice Date ─────────────────────────── */}
+            {/* ── Invoice Info ─────────────────────────── */}
             <SectionCard icon={Calendar} title="Invoice Info">
-              <Row
-                label="Invoice Date"
-                value={formatDate(inv.invoiceDate || inv.createdAt)}
-                amber={inv.isDateOverridden}
-              />
+              <Row label="Invoice Date" value={formatDate(inv.invoiceDate || inv.createdAt)} amber={inv.isDateOverridden} />
               {inv.isDateOverridden && (
                 <div style={{ fontSize: 11, color: "#CC6600", background: "#FFF3E0", borderRadius: 6, padding: "5px 8px", marginBottom: 6 }}>
                   ⚠ Date was manually overridden
@@ -437,74 +466,52 @@ export default function InvoiceDetail() {
 
       {/* ── Action buttons bar ──────────────────────────── */}
       {inv && !dbLocked && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: isDark ? "#1A1A1A" : "#FFFFFF",
-            borderTop: `1px solid ${border}`,
-            padding: "12px 16px",
-            display: "flex",
-            gap: 10,
-            maxWidth: 640,
-            margin: "0 auto",
-            zIndex: 50,
-            boxSizing: "border-box",
-          }}
-        >
-          {/* PDF Download */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: isDark ? "#1A1A1A" : "#FFFFFF", borderTop: `1px solid ${border}`, padding: "12px 16px", display: "flex", gap: 10, maxWidth: 640, margin: "0 auto", zIndex: 50, boxSizing: "border-box" }}>
           <button
             onClick={handleDownloadPDF}
             disabled={pdfLoading}
-            style={{
-              flex: 1,
-              padding: "11px 0",
-              background: "none",
-              border: `1.5px solid #661F1F`,
-              borderRadius: 10,
-              color: "#661F1F",
-              fontWeight: 700,
-              fontSize: 13,
-              cursor: pdfLoading ? "not-allowed" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              fontFamily: "inherit",
-              opacity: pdfLoading ? 0.7 : 1,
-            }}
+            style={{ flex: 1, padding: "11px 0", background: "none", border: "1.5px solid #661F1F", borderRadius: 10, color: "#661F1F", fontWeight: 700, fontSize: 13, cursor: pdfLoading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontFamily: "inherit", opacity: pdfLoading ? 0.7 : 1 }}
           >
             <Download size={15} />
             {pdfLoading ? "Generating..." : "PDF"}
           </button>
-
-          {/* WhatsApp send */}
           <button
             onClick={handleWhatsApp}
             disabled={waLoading}
-            style={{
-              flex: 2,
-              padding: "11px 0",
-              background: waLoading ? "#888" : "#25D366",
-              border: "none",
-              borderRadius: 10,
-              color: "#FFFFFF",
-              fontWeight: 700,
-              fontSize: 13,
-              cursor: waLoading ? "not-allowed" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              fontFamily: "inherit",
-              boxShadow: waLoading ? "none" : "0 2px 10px rgba(37,211,102,0.4)",
-            }}
+            style={{ flex: 2, padding: "11px 0", background: waLoading ? "#888" : "#25D366", border: "none", borderRadius: 10, color: "#FFFFFF", fontWeight: 700, fontSize: 13, cursor: waLoading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontFamily: "inherit", boxShadow: waLoading ? "none" : "0 2px 10px rgba(37,211,102,0.4)" }}
           >
             <Send size={15} />
             {waLoading ? "Sending..." : "Send via WhatsApp"}
           </button>
+        </div>
+      )}
+
+      {/* ── Add Payment Modal ─────────────────────────── */}
+      {showAddPayment && inv && (
+        <AddPaymentEntryModal
+          invoice={inv}
+          balanceDue={balanceDue}
+          onClose={() => setShowAddPayment(false)}
+          onSuccess={() => setActionMsg("Payment recorded successfully!")}
+          darkMode={isDark}
+        />
+      )}
+
+      {/* ── Confirm delete payment entry ──────────────── */}
+      {confirmDeleteEntryId && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
+          <div style={{ background: cardBg, borderRadius: 16, padding: "24px 22px", maxWidth: 340, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,0.25)" }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: textPrimary, textAlign: "center", margin: "0 0 8px" }}>Delete Payment Entry?</h3>
+            <p style={{ fontSize: 13, color: textSecondary, textAlign: "center", margin: "0 0 20px" }}>
+              This will remove this payment from the record and recalculate the balance due. This action cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmDeleteEntryId(null)} style={{ flex: 1, padding: "10px 0", background: "none", border: `1.5px solid ${border}`, borderRadius: 8, color: textPrimary, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={() => handleDeleteEntry(confirmDeleteEntryId)} disabled={!!deletingEntryId} style={{ flex: 1, padding: "10px 0", background: "#CC0000", border: "none", borderRadius: 8, color: "#FFFFFF", fontSize: 14, fontWeight: 700, cursor: deletingEntryId ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {deletingEntryId ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -1,4 +1,4 @@
-// SGA — Last updated: PAYMENT_METHOD_LABELS import added; methodLabel now falls back via PAYMENT_METHOD_LABELS for legacy PARTIAL invoices
+// SGA — Last updated: Restored original — reverted "Initial Payment Amount" label back to "Amount Paid"; removed extra note about additional payments
 // ============================================================
 // InvoiceStepReview.jsx — Step 5: Review & Submit
 // Phase 4 — Shree Ganesh Automobile
@@ -28,7 +28,8 @@ export default function InvoiceStepReview({ data, onChange, darkMode }) {
   const discountAmount = parseFloat(data.discountAmount || 0);
   const preDiscountTotal = parseFloat(data.preDiscountTotal || totalAmount);
   const amountPaid = parseFloat(data.amountPaid || 0);
-  const balanceDue = Math.max(0, totalAmount - amountPaid);
+  const additionalTotal = (data.additionalPaymentEntries || []).reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+  const balanceDue = Math.max(0, totalAmount - amountPaid - additionalTotal);
   const paymentStatus = data.paymentStatus || "UNPAID";
   const methodLabel = PAYMENT_METHODS.find((m) => m.value === data.paymentMethod)?.label
     || PAYMENT_METHOD_LABELS[data.paymentMethod]
@@ -410,6 +411,9 @@ export default function InvoiceStepReview({ data, onChange, darkMode }) {
             <Row label="Total Amount" value={formatCurrency(totalAmount)} mono bold />
           )}
           <Row label="Amount Paid" value={formatCurrency(amountPaid)} mono />
+          {additionalTotal > 0 && (
+            <Row label="Additional Paid" value={formatCurrency(additionalTotal)} mono green />
+          )}
           <Row
             label="Balance Due"
             value={formatCurrency(balanceDue)}

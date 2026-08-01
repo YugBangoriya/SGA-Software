@@ -1,11 +1,8 @@
-// SGA — Last updated: Added HomeButton to header for consistent navigation across all report pages
-/**
- * PendingInvoicesSummary.jsx
- * Owner-only. Two sections:
- *   1. Invoices awaiting approval (approvalStatus === 'PENDING')
- *   2. Invoices with payment issues (PARTIALLY_PAID, UNPAID, EMI, LOAN)
- * Both sorted oldest-first. Total outstanding amount shown at top.
- */
+// SGA — Last updated: Multi-method payment support + bug fixes — fixed Firestore query (approvalStatus→status, orderBy date→createdAt), balanceDue now computed from computeTotalPaid (entries or legacy amountPaid), totalOutstanding derived correctly for all invoice shapes
+// ============================================================
+// PendingInvoicesSummary.jsx — Pending Invoices Report
+// Phase 10 — Shree Ganesh Automobile
+// ============================================================
 
 import { useState, useEffect } from 'react';
 import {
@@ -14,6 +11,7 @@ import {
 import { db } from '../../lib/firebase';
 import { Clock, AlertCircle, RefreshCw, CheckCircle, IndianRupee } from 'lucide-react';
 import HomeButton from '../../components/ui/HomeButton';
+import { computeTotalPaid } from '../../lib/invoiceHelpers';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -77,7 +75,12 @@ function AgeBadge({ days }) {
 // ── Invoice Row ────────────────────────────────────────────────────────────
 
 function InvoiceRow({ inv, showBalance, onNavigate }) {
-  const days = daysSince(inv.date);
+  // balanceDue is not stored in Firestore — compute it via the backward-compat shim
+  const totalPaid  = computeTotalPaid(inv);
+  const balanceDue = Math.max(0, (inv.totalAmount || 0) - totalPaid);
+
+  // Use createdAt for age calculation (date field may be a plain string, not a Timestamp)
+  const days = daysSince(inv.createdAt);
 
   return (
     <div
@@ -102,7 +105,7 @@ function InvoiceRow({ inv, showBalance, onNavigate }) {
           {inv.invoiceNo || '—'}
         </p>
         <p style={{ fontSize: 11, color: '#888', margin: '2px 0 0', fontFamily: 'system-ui' }}>
-          {fmtDate(inv.date)}
+          {fmtDate(inv.createdAt)}
         </p>
       </div>
 
@@ -110,13 +113,13 @@ function InvoiceRow({ inv, showBalance, onNavigate }) {
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <p style={{ fontSize: 14, fontWeight: 600, color: '#222', margin: 0, fontFamily: 'system-ui' }}>
-            {inv.customerName || '—'}
+            {inv.customerSnapshot?.name || '—'}
           </p>
           <AgeBadge days={days} />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888', fontFamily: 'monospace' }}>
-            {inv.vehicleNo || '—'}
+            {inv.vehicleSnapshot?.registrationNo || '—'}
           </span>
           {inv.paymentMethod && (
             <span style={{ fontSize: 11, color: '#555', fontFamily: 'system-ui' }}>
@@ -128,9 +131,9 @@ function InvoiceRow({ inv, showBalance, onNavigate }) {
               · {inv.loanProvider}
             </span>
           )}
-          {inv.expectedCompletionDate && (
+          {inv.loanCompletionDate && (
             <span style={{ fontSize: 11, color: '#CC6600', fontFamily: 'system-ui' }}>
-              · Due: {fmtDate(inv.expectedCompletionDate)}
+              · Due: {fmtDate(inv.loanCompletionDate)}
             </span>
           )}
         </div>
@@ -139,7 +142,7 @@ function InvoiceRow({ inv, showBalance, onNavigate }) {
       {/* Amount + status */}
       <div style={{ textAlign: 'right' }}>
         <p style={{ fontSize: 15, fontWeight: 800, color: '#CC0000', margin: 0, fontFamily: 'monospace' }}>
-          {showBalance ? fmt(inv.balanceDue) : fmt(inv.totalAmount)}
+          {showBalance ? fmt(balanceDue) : fmt(inv.totalAmount)}
         </p>
         {showBalance && inv.totalAmount && (
           <p style={{ fontSize: 10, color: '#888', margin: '2px 0 4px', fontFamily: 'system-ui' }}>
@@ -157,7 +160,6 @@ function InvoiceRow({ inv, showBalance, onNavigate }) {
 function Section({ title, icon: Icon, count, totalAmount, invoices, showBalance, emptyMessage, borderColor, onNavigate }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      {/* Section header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '12px 16px 10px',
@@ -212,17 +214,18 @@ export default function PendingInvoicesSummary({ onNavigateToInvoice }) {
   const [loading, setLoading]                = useState(true);
 
   useEffect(() => {
-    // 1. Pending approval (oldest first)
+    // Bug fix: was 'approvalStatus' (wrong field) — correct field is 'status'
+    // Bug fix: was orderBy('date') — 'date' is a string field, use 'createdAt' (Timestamp) for correct ordering
     const q1 = query(
       collection(db, 'invoices'),
-      where('approvalStatus', '==', 'PENDING'),
-      orderBy('date', 'asc')
+      where('status', '==', 'PENDING'),
+      orderBy('createdAt', 'asc')
     );
-    // 2. Payment issues (oldest first)
+
     const q2 = query(
       collection(db, 'invoices'),
       where('paymentStatus', 'in', ['PARTIALLY_PAID', 'UNPAID', 'EMI', 'LOAN']),
-      orderBy('date', 'asc')
+      orderBy('createdAt', 'asc')
     );
 
     let loaded = 0;
@@ -241,10 +244,11 @@ export default function PendingInvoicesSummary({ onNavigateToInvoice }) {
     return () => { unsub1(); unsub2(); };
   }, []);
 
-  // Total outstanding (balanceDue on payment-issue invoices)
-  const totalOutstanding = pendingPayment.reduce(
-    (sum, inv) => sum + (Number(inv.balanceDue) || 0), 0
-  );
+  // Total outstanding — computed via computeTotalPaid (handles both entries model and legacy amountPaid)
+  const totalOutstanding = pendingPayment.reduce((sum, inv) => {
+    const paid = computeTotalPaid(inv);
+    return sum + Math.max(0, (inv.totalAmount || 0) - paid);
+  }, 0);
 
   return (
     <div style={{ paddingBottom: 60 }}>
@@ -257,12 +261,12 @@ export default function PendingInvoicesSummary({ onNavigateToInvoice }) {
               Pending Invoices
             </h2>
             <p style={{ color: '#F0BABA', fontSize: 12, margin: '4px 0 0', fontFamily: 'system-ui' }}>
-          {loading ? 'Loading…' : (
-            <>
-              {pendingApproval.length} awaiting approval
-              {pendingPayment.length > 0 && ` · ${pendingPayment.length} with outstanding payments`}
-            </>
-          )}
+              {loading ? 'Loading…' : (
+                <>
+                  {pendingApproval.length} awaiting approval
+                  {pendingPayment.length > 0 && ` · ${pendingPayment.length} with outstanding payments`}
+                </>
+              )}
             </p>
           </div>
         </div>
