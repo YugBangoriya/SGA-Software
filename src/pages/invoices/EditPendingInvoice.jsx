@@ -1,4 +1,4 @@
-// SGA — Last updated: Multi-method payment support — handleSave builds paymentEntries[] + totalPaid from wizard form including additionalPaymentEntries; form init reads existing entries[0] for amountPaid; additionalPaymentEntries initialised to []
+// SGA — Last updated: Fixed pre-approval edit rehydrating additionalPaymentEntries from existing paymentEntries[1...] so all recorded payment entries are visible and editable when EditPendingInvoice is opened
 // ============================================================
 // EditPendingInvoice.jsx — Edit a PENDING invoice (items, labour, payment)
 // ============================================================
@@ -24,13 +24,13 @@ import {
   Package, Wrench, CreditCard, CheckCircle, ArrowLeft,
   ArrowRight, X, Save,
 } from "lucide-react";
-import useInvoiceStore  from "../../store/invoiceStore";
-import useAuthStore     from "../../store/authStore";
-import useThemeStore    from "../../store/themeStore";
-import InvoiceStepItems   from "../../components/invoices/InvoiceStepItems";
-import InvoiceStepLabour  from "../../components/invoices/InvoiceStepLabour";
+import useInvoiceStore from "../../store/invoiceStore";
+import useAuthStore from "../../store/authStore";
+import useThemeStore from "../../store/themeStore";
+import InvoiceStepItems from "../../components/invoices/InvoiceStepItems";
+import InvoiceStepLabour from "../../components/invoices/InvoiceStepLabour";
 import InvoiceStepPayment from "../../components/invoices/InvoiceStepPayment";
-import DBLockedBanner     from "../../components/invoices/DBLockedBanner";
+import DBLockedBanner from "../../components/invoices/DBLockedBanner";
 import {
   derivePaymentStatus,
   formatCurrency,
@@ -38,10 +38,10 @@ import {
 } from "../../lib/invoiceHelpers";
 
 const STEPS = [
-  { id: 1, label: "Items",   icon: Package,    description: "Edit line items"   },
-  { id: 2, label: "Labour",  icon: Wrench,      description: "Labour charges"    },
-  { id: 3, label: "Payment", icon: CreditCard,  description: "Payment details"   },
-  { id: 4, label: "Review",  icon: CheckCircle, description: "Review & save"     },
+  { id: 1, label: "Items", icon: Package, description: "Edit line items" },
+  { id: 2, label: "Labour", icon: Wrench, description: "Labour charges" },
+  { id: 3, label: "Payment", icon: CreditCard, description: "Payment details" },
+  { id: 4, label: "Review", icon: CheckCircle, description: "Review & save" },
 ];
 
 export default function EditPendingInvoice() {
@@ -59,19 +59,19 @@ export default function EditPendingInvoice() {
     loading, error, clearError,
   } = useInvoiceStore();
 
-  const isDark         = theme === "dark";
+  const isDark = theme === "dark";
   const isOwnerOrAbove = ["owner", "superadmin"].includes(role);
 
-  const bg            = isDark ? "#1A1A1A" : "#CDCBC9";
-  const cardBg        = isDark ? "#2A2A2A" : "#FFFFFF";
-  const border        = isDark ? "#3A3A3A" : "#E8E2DF";
-  const textPrimary   = isDark ? "#E8E8E8" : "#222222";
+  const bg = isDark ? "#1A1A1A" : "#CDCBC9";
+  const cardBg = isDark ? "#2A2A2A" : "#FFFFFF";
+  const border = isDark ? "#3A3A3A" : "#E8E2DF";
+  const textPrimary = isDark ? "#E8E8E8" : "#222222";
   const textSecondary = isDark ? "#999999" : "#666666";
 
-  const [step,        setStep]        = useState(1);
-  const [form,        setForm]        = useState(null);
-  const [loadDone,    setLoadDone]    = useState(false);
-  const [submitting,  setSubmitting]  = useState(false);
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(null);
+  const [loadDone, setLoadDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -96,41 +96,66 @@ export default function EditPendingInvoice() {
       return;
     }
 
-    // For the initial amountPaid field: if the invoice already has a
-    // paymentEntries array (re-editing an already-partially-filled invoice),
-    // show the first entry's amount. Otherwise fall back to the legacy amountPaid.
+    // ── Payment entry rehydration ────────────────────────────────
+    // When a pending invoice already has a paymentEntries[] array (i.e. it was
+    // created with multiple payment methods, or was previously edited and saved
+    // with payment entries), we need to split those entries back into the two
+    // form fields that InvoiceStepPayment understands:
+    //
+    //   amountPaid             ← amount from paymentEntries[0] (the primary entry)
+    //   paymentMethod          ← method from paymentEntries[0]
+    //   additionalPaymentEntries ← paymentEntries[1...] mapped to local shape
+    //
+    // Without this split, re-opening the edit form would show only the first
+    // entry's amount and silently discard every subsequent entry — causing the
+    // balance-due display to be wrong and losing data on save.
+
     const firstEntry =
       Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 0
         ? inv.paymentEntries[0]
         : null;
 
+    // Rehydrate all entries beyond the first into additionalPaymentEntries.
+    // Each stored entry has shape { id, amount, method, date, reference, recordedBy, ... }.
+    // The local additionalPaymentEntries shape is { method, amount, reference }.
+    const additionalPaymentEntries =
+      Array.isArray(inv.paymentEntries) && inv.paymentEntries.length > 1
+        ? inv.paymentEntries.slice(1).map((e) => ({
+          method: e.method || "CASH",
+          amount: parseFloat(e.amount || 0),
+          reference: e.reference || "",
+        }))
+        : [];
+
     setForm({
-      customerId:            inv.customerId       || null,
-      customerSnapshot:      inv.customerSnapshot || null,
-      vehicleSnapshot:       inv.vehicleSnapshot  || null,
-      items:                 (inv.items || []).map((item) => ({ ...item })),
-      labourCost:            inv.labourCost != null ? String(inv.labourCost) : "",
-      invoiceDate:           inv.invoiceDate || new Date().toISOString().split("T")[0],
-      dueDate:               inv.dueDate     || "",
-      isDateOverridden:      inv.isDateOverridden || false,
-      gstEnabled:            inv.gstEnabled  || false,
-      paymentMethod:         inv.paymentMethod || "CASH",
-      amountPaid:            firstEntry
-                               ? String(firstEntry.amount)
-                               : (inv.amountPaid != null ? String(inv.amountPaid) : ""),
-      paymentNote:           inv.paymentNote || "",
-      loanProvider:          inv.loanProvider || "",
-      emiAmount:             inv.emiAmount    || "",
-      loanCompletionDate:    inv.loanCompletionDate || "",
-      discountAmount:        inv.discountAmount || 0,
-      subtotal:              inv.subtotal    || 0,
-      cgst:                  inv.cgst        || 0,
-      sgst:                  inv.sgst        || 0,
-      preDiscountTotal:      inv.preDiscountTotal || 0,
-      totalAmount:           inv.totalAmount || 0,
-      paymentStatus:         inv.paymentStatus || "UNPAID",
-      // Additional payment entries (new entries added during this edit session)
-      additionalPaymentEntries: [],
+      customerId: inv.customerId || null,
+      customerSnapshot: inv.customerSnapshot || null,
+      vehicleSnapshot: inv.vehicleSnapshot || null,
+      items: (inv.items || []).map((item) => ({ ...item })),
+      labourCost: inv.labourCost != null ? String(inv.labourCost) : "",
+      invoiceDate: inv.invoiceDate || new Date().toISOString().split("T")[0],
+      dueDate: inv.dueDate || "",
+      isDateOverridden: inv.isDateOverridden || false,
+      gstEnabled: inv.gstEnabled || false,
+      // Use firstEntry.method when available so it is consistent with the amount
+      paymentMethod: firstEntry?.method || inv.paymentMethod || "CASH",
+      amountPaid: firstEntry
+        ? String(firstEntry.amount)
+        : (inv.amountPaid != null ? String(inv.amountPaid) : ""),
+      paymentNote: inv.paymentNote || "",
+      loanProvider: inv.loanProvider || "",
+      emiAmount: inv.emiAmount || "",
+      loanCompletionDate: inv.loanCompletionDate || "",
+      discountAmount: inv.discountAmount || 0,
+      subtotal: inv.subtotal || 0,
+      cgst: inv.cgst || 0,
+      sgst: inv.sgst || 0,
+      preDiscountTotal: inv.preDiscountTotal || 0,
+      totalAmount: inv.totalAmount || 0,
+      paymentStatus: inv.paymentStatus || "UNPAID",
+      // Rehydrated from paymentEntries[1...] — preserves all entries recorded
+      // before this edit session so they are visible and editable in Step 3.
+      additionalPaymentEntries,
     });
   }, [currentInvoice?.id]);
 
@@ -165,7 +190,7 @@ export default function EditPendingInvoice() {
   };
 
   const handleNext = () => { if (step < STEPS.length) setStep((s) => s + 1); };
-  const handleBack = () => { if (step > 1)            setStep((s) => s - 1); };
+  const handleBack = () => { if (step > 1) setStep((s) => s - 1); };
 
   // ── Save changes ──────────────────────────────────────────────
   const handleSave = async () => {
@@ -182,9 +207,9 @@ export default function EditPendingInvoice() {
       if (initialAmount > 0 && !["LOAN", "EMI"].includes(form.paymentMethod)) {
         paymentEntries.push(
           buildPaymentEntry({
-            amount:    initialAmount,
-            method:    form.paymentMethod,
-            date:      form.invoiceDate,
+            amount: initialAmount,
+            method: form.paymentMethod,
+            date: form.invoiceDate,
             reference: form.paymentNote || "",
             currentUser,
           })
@@ -194,9 +219,9 @@ export default function EditPendingInvoice() {
       // Spread in additional entries recorded via the inline form in InvoiceStepPayment
       const additionalEntries = (form.additionalPaymentEntries || []).map((e) =>
         buildPaymentEntry({
-          amount:    e.amount,
-          method:    e.method,
-          date:      form.invoiceDate,
+          amount: e.amount,
+          method: e.method,
+          date: form.invoiceDate,
           reference: e.reference || "",
           currentUser,
         })
@@ -211,29 +236,29 @@ export default function EditPendingInvoice() {
       );
 
       const updates = {
-        items:              form.items,
-        labourCost:         parseFloat(form.labourCost || 0),
-        invoiceDate:        form.invoiceDate,
-        dueDate:            form.dueDate || "",
-        isDateOverridden:   form.isDateOverridden || false,
-        gstEnabled:         form.gstEnabled || false,
-        paymentMethod:      form.paymentMethod,
+        items: form.items,
+        labourCost: parseFloat(form.labourCost || 0),
+        invoiceDate: form.invoiceDate,
+        dueDate: form.dueDate || "",
+        isDateOverridden: form.isDateOverridden || false,
+        gstEnabled: form.gstEnabled || false,
+        paymentMethod: form.paymentMethod,
         // New payment model
         paymentEntries,
         totalPaid,
         paymentStatus,
         // Legacy flat fields for backward compat
-        amountPaid:         initialAmount,
-        paymentNote:        form.paymentNote || "",
-        loanProvider:       form.loanProvider || "",
-        emiAmount:          form.emiAmount ? parseFloat(form.emiAmount) : null,
+        amountPaid: initialAmount,
+        paymentNote: form.paymentNote || "",
+        loanProvider: form.loanProvider || "",
+        emiAmount: form.emiAmount ? parseFloat(form.emiAmount) : null,
         loanCompletionDate: form.loanCompletionDate || "",
-        discountAmount:     form.discountAmount || 0,
-        subtotal:           form.subtotal       || 0,
-        cgst:               form.cgst           || 0,
-        sgst:               form.sgst           || 0,
-        preDiscountTotal:   form.preDiscountTotal || 0,
-        totalAmount:        form.totalAmount     || 0,
+        discountAmount: form.discountAmount || 0,
+        subtotal: form.subtotal || 0,
+        cgst: form.cgst || 0,
+        sgst: form.sgst || 0,
+        preDiscountTotal: form.preDiscountTotal || 0,
+        totalAmount: form.totalAmount || 0,
       };
 
       await updateInvoice(id, updates, currentUser);
@@ -273,7 +298,7 @@ export default function EditPendingInvoice() {
     if (!form) return null;
     switch (step) {
       case 1:
-        return <InvoiceStepItems  data={form} onChange={updateForm} darkMode={isDark} />;
+        return <InvoiceStepItems data={form} onChange={updateForm} darkMode={isDark} />;
       case 2:
         return <InvoiceStepLabour data={form} onChange={updateForm} darkMode={isDark} />;
       case 3:
@@ -312,19 +337,19 @@ export default function EditPendingInvoice() {
                 Review Changes
               </div>
               {[
-                { label: "Items",           value: `${form.items.length} item${form.items.length !== 1 ? "s" : ""}` },
-                { label: "Labour",          value: formatCurrency(parseFloat(form.labourCost || 0)) },
-                { label: "Total",           value: formatCurrency(form.totalAmount || 0) },
-                { label: "Method",          value: form.paymentMethod },
+                { label: "Items", value: `${form.items.length} item${form.items.length !== 1 ? "s" : ""}` },
+                { label: "Labour", value: formatCurrency(parseFloat(form.labourCost || 0)) },
+                { label: "Total", value: formatCurrency(form.totalAmount || 0) },
+                { label: "Method", value: form.paymentMethod },
                 { label: "Initial Payment", value: formatCurrency(parseFloat(form.amountPaid || 0)) },
-                { label: "Status",          value: form.paymentStatus },
+                { label: "Status", value: form.paymentStatus },
               ].map(({ label, value }) => (
                 <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ fontSize: 12, color: textSecondary }}>{label}</span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: textPrimary }}>{value}</span>
                 </div>
               ))}
-              {/* Show additional entries if any were recorded in step 3 */}
+              {/* Show additional entries — both rehydrated from existing data and newly added */}
               {(form.additionalPaymentEntries || []).length > 0 && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${border}` }}>
                   <div style={{ fontSize: 11, color: textSecondary, marginBottom: 4, fontFamily: "Arial, sans-serif" }}>
@@ -415,9 +440,9 @@ export default function EditPendingInvoice() {
         }}
       >
         {STEPS.map((s, idx) => {
-          const Icon    = s.icon;
+          const Icon = s.icon;
           const isActive = s.id === step;
-          const isDone   = s.id < step;
+          const isDone = s.id < step;
           return (
             <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div
