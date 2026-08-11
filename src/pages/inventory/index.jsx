@@ -1,4 +1,4 @@
-// SGA — Last updated: Untracked items display totalSold instead of quantity; Local Items filter chip; cost-missing badge on Local Items; StockStatusBadge/QuantityDisplay handle isUntracked (clickable, shows modal with per-item return quantities); tracks returnedQuantity field set on return invoice approval
+// SGA — Last updated: Added "Download Shortcuts" button (owner/admin only) — generates a printable A4 PDF reference sheet listing all inventory items and their shortcuts in a 2-section per row layout (4 columns: Item | Shortcut || Item | Shortcut)
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -27,7 +27,9 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Plus, Search, SlidersHorizontal, RefreshCw, Trash2, RotateCcw, X } from 'lucide-react';
+import { Package, Plus, Search, SlidersHorizontal, RefreshCw, Trash2, RotateCcw, X, FileDown } from 'lucide-react';
+import { pdf } from '@react-pdf/renderer';
+import ShortcutListPDF from './ShortcutListPDF';
 
 import useInventoryStore from '../../store/inventoryStore';
 import useAuthStore      from '../../store/authStore';
@@ -496,11 +498,14 @@ export default function InventoryPage() {
   const [replenishTarget,    setReplenishTarget]     = useState(null);
 
   // ── Select / Delete state ─────────────────────────────────────────────────
-  const [showReturnedModal, setShowReturnedModal] = useState(false);
-  const [selectMode,      setSelectMode]      = useState(false);
-  const [selectedIds,     setSelectedIds]     = useState(new Set());
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [isDeleting,      setIsDeleting]      = useState(false);
+  const [showReturnedModal,        setShowReturnedModal]        = useState(false);
+  const [selectMode,               setSelectMode]               = useState(false);
+  const [selectedIds,              setSelectedIds]              = useState(new Set());
+  const [showDeleteModal,          setShowDeleteModal]          = useState(false);
+  const [isDeleting,               setIsDeleting]              = useState(false);
+
+  // ── Shortcuts PDF download state ──────────────────────────────────────────
+  const [isDownloadingShortcuts, setIsDownloadingShortcuts] = useState(false);
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'superadmin';
 
@@ -574,6 +579,30 @@ export default function InventoryPage() {
     }
   };
 
+  // ── Shortcuts PDF download ────────────────────────────────────────────────
+  // Generates an A4 PDF with ALL inventory items (sorted A→Z) in a 2-section
+  // per row layout: Item | Shortcut || Item | Shortcut. Items without a
+  // shortcut show an empty cell so the list covers the entire inventory.
+  const handleDownloadShortcuts = async () => {
+    if (items.length === 0) return;
+    setIsDownloadingShortcuts(true);
+    try {
+      const blob = await pdf(<ShortcutListPDF items={items} />).toBlob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'SGA_Inventory_Shortcuts.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[InventoryPage] shortcuts PDF failed:', err);
+    } finally {
+      setIsDownloadingShortcuts(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: COLORS.appBg, paddingBottom: 100 }}>
 
@@ -630,6 +659,35 @@ export default function InventoryPage() {
                 }}
               >
                 Cancel
+              </button>
+            )}
+
+            {/* Download Shortcuts PDF — owner/admin only, not in select mode */}
+            {isOwnerOrAdmin && !selectMode && (
+              <button
+                onClick={handleDownloadShortcuts}
+                disabled={isDownloadingShortcuts || items.length === 0}
+                title="Download printable shortcuts list"
+                style={{
+                  background:   'rgba(255,255,255,0.15)',
+                  color:        isDownloadingShortcuts ? 'rgba(255,255,255,0.5)' : '#FFFFFF',
+                  border:       '1.5px solid rgba(255,255,255,0.3)',
+                  borderRadius: RADII.md,
+                  padding:      '8px 12px',
+                  cursor:       isDownloadingShortcuts || items.length === 0 ? 'not-allowed' : 'pointer',
+                  display:      'flex',
+                  alignItems:   'center',
+                  gap:          5,
+                  opacity:      items.length === 0 ? 0.5 : 1,
+                  transition:   'opacity 0.2s',
+                }}
+              >
+                <FileDown size={15} />
+                {!isMobile && (
+                  <span style={{ fontSize: 12, fontFamily: TYPOGRAPHY.sans }}>
+                    {isDownloadingShortcuts ? 'Generating…' : 'Shortcuts'}
+                  </span>
+                )}
               </button>
             )}
 
