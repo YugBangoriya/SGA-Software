@@ -1,10 +1,15 @@
-// SGA — Last updated: Added Edit Quotation button in header (Owner/SuperAdmin only).
-// Navigates to /quotations/:id/edit. Shows "Updated" banner when returning from edit.
-// Prior fix retained: Logo pre-fetch for PDFs (fetchImageAsBase64 / enrichBizSettingsWithLogo).
+// SGA — Last updated: Two fixes in this session —
+// (1) PDF header layout: logo now sits beside the business name/address (flexDirection row),
+//     matching the InvoicePDF layout, so both documents look consistent.
+// (2) Open PDF always shows logo: "Open PDF" now prefers the fresh localPdfUrl blob (generated
+//     client-side with the logo) over quotation.pdfUrl (the stored Firebase Storage URL which
+//     can be stale). handleGeneratePdf also unconditionally re-uploads on Regenerate so the
+//     stored URL stays in sync with the latest PDF.
 //
 // src/pages/quotations/QuotationDetail.jsx
 
 import { useState, useEffect } from "react";
+import LOGO_BASE64 from "../../assets/logo_base64";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { pdf } from "@react-pdf/renderer";
 import {
@@ -46,10 +51,17 @@ async function fetchImageAsBase64(url) {
 }
 
 async function enrichBizSettingsWithLogo(bizSettings) {
-  if (!bizSettings?.businessLogoUrl) return bizSettings;
-  if (bizSettings.businessLogoUrl.startsWith("data:")) return bizSettings;
-  const base64 = await fetchImageAsBase64(bizSettings.businessLogoUrl);
-  return { ...bizSettings, businessLogoUrl: base64 || null };
+  const biz = bizSettings || {};
+  // No URL configured → use embedded fallback logo (same pattern as invoiceHelpers)
+  if (!biz.businessLogoUrl) {
+    return { ...biz, businessLogoUrl: LOGO_BASE64 };
+  }
+  // Already base64 (e.g. passed directly from CreateQuotationForm) → leave untouched
+  if (biz.businessLogoUrl.startsWith("data:")) return biz;
+  // Remote Firebase Storage URL → pre-fetch to base64 to avoid CORS inside the renderer
+  const base64 = await fetchImageAsBase64(biz.businessLogoUrl);
+  // Fall back to embedded logo if the fetch failed (CORS / network error)
+  return { ...biz, businessLogoUrl: base64 || LOGO_BASE64 };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -196,12 +208,12 @@ export default function QuotationDetail() {
       const objUrl = URL.createObjectURL(blob);
       setLocalPdfUrl(objUrl);
 
-      // Upload to Firebase Storage and persist URL to Firestore (if not already done)
-      if (!quotation.pdfUrl) {
-        const downloadUrl = await uploadQuotationPdf(blob, quotation.quotationNumber);
-        await updateQuotationPdfUrl(quotation.id, downloadUrl);
-        setQuotation((prev) => ({ ...prev, pdfUrl: downloadUrl }));
-      }
+      // Always upload to Firebase Storage on generate/regenerate so that
+      // quotation.pdfUrl always points to the latest version of the PDF
+      // (including any logo / layout changes). This keeps "Open PDF" in sync.
+      const downloadUrl = await uploadQuotationPdf(blob, quotation.quotationNumber);
+      await updateQuotationPdfUrl(quotation.id, downloadUrl);
+      setQuotation((prev) => ({ ...prev, pdfUrl: downloadUrl }));
 
       setActionSuccess("pdf_generated");
       setTimeout(() => setActionSuccess(null), 4000);
@@ -410,10 +422,11 @@ export default function QuotationDetail() {
             </span>
           </button>
 
-          {/* Open in new tab (if stored URL exists) */}
-          {quotation.pdfUrl && (
+          {/* Open in new tab — prefers freshly generated localPdfUrl (has logo);
+              falls back to stored quotation.pdfUrl only when no local blob exists */}
+          {(localPdfUrl || quotation.pdfUrl) && (
             <a
-              href={quotation.pdfUrl}
+              href={localPdfUrl || quotation.pdfUrl}
               target="_blank"
               rel="noreferrer"
               className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white border border-[#E8E2DF]

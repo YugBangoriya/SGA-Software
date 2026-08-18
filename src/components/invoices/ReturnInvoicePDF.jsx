@@ -1,4 +1,4 @@
-// SGA — Last updated: Fixed Refund Method label — now uses PAYMENT_METHOD_LABELS for human-readable display (e.g. "Bank Transfer" instead of "BANK_TRANSFER"); PAYMENT_METHOD_LABELS added to invoiceHelpers import; no other changes
+// SGA — Last updated: Fixed ₹ glyph rendering in PDF — replaced formatCurrency with formatCurrencyPDF (uses "Rs." prefix) in all <Text> nodes; Helvetica does not include U+20B9, causing ₹ to render as "1" in generated PDFs
 // ============================================================
 // ReturnInvoicePDF.jsx — @react-pdf/renderer Return Invoice Template
 // Shree Ganesh Automobile
@@ -9,7 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import LOGO_BASE64 from "../../assets/logo_base64";
 import {
-  formatCurrency, formatDate, DEFAULT_TERMS, PAYMENT_METHOD_LABELS,
+  formatCurrencyPDF, formatDate, DEFAULT_TERMS, PAYMENT_METHOD_LABELS,
 } from "../../lib/invoiceHelpers";
 
 const C = {
@@ -210,10 +210,10 @@ export default function ReturnInvoicePDFDocument({ invoice, businessSettings }) 
               <Text style={[styles.tableCell,     styles.colNo]}>{idx + 1}</Text>
               <Text style={[styles.tableCell,     styles.colDesc]}>{item.name}</Text>
               <Text style={[styles.tableCellMono, styles.colQty]}>{item.quantity}</Text>
-              <Text style={[styles.tableCellMono, styles.colOrigPrice]}>{formatCurrency(item.originalPrice)}</Text>
-              <Text style={[styles.tableCellMono, styles.colReturnPrice]}>{formatCurrency(item.returnPrice)}</Text>
+              <Text style={[styles.tableCellMono, styles.colOrigPrice]}>{formatCurrencyPDF(item.originalPrice)}</Text>
+              <Text style={[styles.tableCellMono, styles.colReturnPrice]}>{formatCurrencyPDF(item.returnPrice)}</Text>
               <Text style={[styles.tableCellMono, styles.colTotal]}>
-                {formatCurrency(parseFloat(item.returnPrice || 0) * (item.quantity || 1))}
+                {formatCurrencyPDF(parseFloat(item.returnPrice || 0) * (item.quantity || 1))}
               </Text>
             </View>
           ))}
@@ -225,13 +225,13 @@ export default function ReturnInvoicePDFDocument({ invoice, businessSettings }) 
             <View style={styles.dividerLine} />
             <View style={styles.grandTotalLine}>
               <Text style={styles.grandTotalLabel}>TOTAL REFUND</Text>
-              <Text style={styles.grandTotalValue}>{formatCurrency(totalReturnAmount)}</Text>
+              <Text style={styles.grandTotalValue}>{formatCurrencyPDF(totalReturnAmount)}</Text>
             </View>
             <View style={[styles.dividerLine, { marginTop: 6 }]} />
             <View style={[styles.totalLine, { marginTop: 4 }]}>
               <Text style={[styles.totalLabel, { color: C.amber }]}>Refund Paid to Customer</Text>
               <Text style={[styles.totalValue, { color: C.amber, fontFamily: "Courier-Bold" }]}>
-                {formatCurrency(totalReturnAmount)}
+                {formatCurrencyPDF(totalReturnAmount)}
               </Text>
             </View>
           </View>

@@ -1,4 +1,4 @@
-// SGA — Last updated: Multi-method payment support — totalPaid now computed via computeTotalPaid (backward-compat: reads paymentEntries[] or legacy amountPaid scalar); totals section renders per-entry payment ledger when multiple entries exist; single-entry and legacy invoices unchanged visually; Payment Details panel shows methods from entries when available; PAYMENT_METHOD_LABELS imported for entry method display
+// SGA — Last updated: Fixed ₹ glyph rendering in PDF — replaced formatCurrency with formatCurrencyPDF (uses "Rs." prefix) throughout all <Text> nodes; Helvetica WinAnsiEncoding does not include U+20B9 so the ₹ symbol was rendering as "1" in generated PDFs
 // ============================================================
 // InvoicePDF.jsx — @react-pdf/renderer Invoice Template
 // Phase 4 — Shree Ganesh Automobile
@@ -15,7 +15,7 @@ import {
 } from "@react-pdf/renderer";
 import LOGO_BASE64 from "../../assets/logo_base64";
 import {
-  formatCurrency,
+  formatCurrencyPDF,
   formatDate,
   DEFAULT_TERMS,
   PAYMENT_STATUS_LABELS,
@@ -284,8 +284,8 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
               <Text style={[styles.tableCell,     styles.colNo]}>{idx + 1}</Text>
               <Text style={[styles.tableCell,     styles.colDesc]}>{item.name || item.itemName}</Text>
               <Text style={[styles.tableCellMono, styles.colQty]}>{item.quantity}</Text>
-              <Text style={[styles.tableCellMono, styles.colPrice]}>{formatCurrency(item.sellingPrice)}</Text>
-              <Text style={[styles.tableCellMono, styles.colTotal]}>{formatCurrency(item.sellingPrice * item.quantity)}</Text>
+              <Text style={[styles.tableCellMono, styles.colPrice]}>{formatCurrencyPDF(item.sellingPrice)}</Text>
+              <Text style={[styles.tableCellMono, styles.colTotal]}>{formatCurrencyPDF(item.sellingPrice * item.quantity)}</Text>
             </View>
           ))}
 
@@ -294,8 +294,8 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
               <Text style={[styles.tableCell,     styles.colNo]}>{items.length + 1}</Text>
               <Text style={[styles.tableCell,     styles.colDesc]}>Labour / Installation Charges</Text>
               <Text style={[styles.tableCellMono, styles.colQty]}>1</Text>
-              <Text style={[styles.tableCellMono, styles.colPrice]}>{formatCurrency(labourCost)}</Text>
-              <Text style={[styles.tableCellMono, styles.colTotal]}>{formatCurrency(labourCost)}</Text>
+              <Text style={[styles.tableCellMono, styles.colPrice]}>{formatCurrencyPDF(labourCost)}</Text>
+              <Text style={[styles.tableCellMono, styles.colTotal]}>{formatCurrencyPDF(labourCost)}</Text>
             </View>
           )}
         </View>
@@ -305,18 +305,18 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
           <View style={styles.totalsBox}>
             <View style={styles.totalLine}>
               <Text style={styles.totalLabel}>Subtotal</Text>
-              <Text style={styles.totalValue}>{formatCurrency(invoice.subtotal || 0)}</Text>
+              <Text style={styles.totalValue}>{formatCurrencyPDF(invoice.subtotal || 0)}</Text>
             </View>
 
             {gstEnabled && (
               <>
                 <View style={styles.totalLine}>
                   <Text style={styles.totalLabel}>CGST (9%)</Text>
-                  <Text style={styles.totalValue}>{formatCurrency(cgst)}</Text>
+                  <Text style={styles.totalValue}>{formatCurrencyPDF(cgst)}</Text>
                 </View>
                 <View style={styles.totalLine}>
                   <Text style={styles.totalLabel}>SGST (9%)</Text>
-                  <Text style={styles.totalValue}>{formatCurrency(sgst)}</Text>
+                  <Text style={styles.totalValue}>{formatCurrencyPDF(sgst)}</Text>
                 </View>
               </>
             )}
@@ -327,22 +327,22 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
               <>
                 <View style={styles.totalLine}>
                   <Text style={styles.totalLabel}>Invoice Total</Text>
-                  <Text style={[styles.totalValue, { color: C.textMid }]}>{formatCurrency(preDiscountTotal)}</Text>
+                  <Text style={[styles.totalValue, { color: C.textMid }]}>{formatCurrencyPDF(preDiscountTotal)}</Text>
                 </View>
                 <View style={styles.totalLine}>
                   <Text style={[styles.totalLabel, { color: C.amber }]}>Discount</Text>
-                  <Text style={[styles.totalValue, { color: C.amber }]}>- {formatCurrency(discountAmount)}</Text>
+                  <Text style={[styles.totalValue, { color: C.amber }]}>- {formatCurrencyPDF(discountAmount)}</Text>
                 </View>
                 <View style={styles.dividerLine} />
                 <View style={styles.grandTotalLine}>
                   <Text style={styles.grandTotalLabel}>REVISED TOTAL</Text>
-                  <Text style={styles.grandTotalValue}>{formatCurrency(totalAmount)}</Text>
+                  <Text style={styles.grandTotalValue}>{formatCurrencyPDF(totalAmount)}</Text>
                 </View>
               </>
             ) : (
               <View style={styles.grandTotalLine}>
                 <Text style={styles.grandTotalLabel}>TOTAL</Text>
-                <Text style={styles.grandTotalValue}>{formatCurrency(totalAmount)}</Text>
+                <Text style={styles.grandTotalValue}>{formatCurrencyPDF(totalAmount)}</Text>
               </View>
             )}
 
@@ -366,26 +366,26 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
                       {entry.date ? fmtDateStr(entry.date) : "—"} · {PAYMENT_METHOD_LABELS[entry.method] || entry.method}
                       {entry.reference ? ` (${entry.reference})` : ""}
                     </Text>
-                    <Text style={styles.entryValue}>{formatCurrency(entry.amount)}</Text>
+                    <Text style={styles.entryValue}>{formatCurrencyPDF(entry.amount)}</Text>
                   </View>
                 ))}
                 <View style={[styles.totalLine, { marginTop: 2 }]}>
                   <Text style={[styles.totalLabel, { fontFamily: "Helvetica-Bold" }]}>Total Paid</Text>
-                  <Text style={[styles.totalValue, { color: C.green, fontFamily: "Courier-Bold" }]}>{formatCurrency(totalPaid)}</Text>
+                  <Text style={[styles.totalValue, { color: C.green, fontFamily: "Courier-Bold" }]}>{formatCurrencyPDF(totalPaid)}</Text>
                 </View>
               </>
             ) : (
               /* Single entry or legacy invoice — classic "Amount Paid" line */
               <View style={[styles.totalLine, { marginTop: 4 }]}>
                 <Text style={styles.totalLabel}>Amount Paid</Text>
-                <Text style={[styles.totalValue, { color: C.green }]}>{formatCurrency(totalPaid)}</Text>
+                <Text style={[styles.totalValue, { color: C.green }]}>{formatCurrencyPDF(totalPaid)}</Text>
               </View>
             )}
 
             <View style={styles.totalLine}>
               <Text style={[styles.totalLabel, { fontFamily: "Helvetica-Bold" }]}>Balance Due</Text>
               <Text style={[styles.totalValue, { color: balanceDue > 0 ? C.red : C.green, fontFamily: "Courier-Bold" }]}>
-                {formatCurrency(balanceDue)}
+                {formatCurrencyPDF(balanceDue)}
               </Text>
             </View>
           </View>
@@ -415,7 +415,7 @@ export default function InvoicePDFDocument({ invoice, businessSettings }) {
             {invoice.emiAmount && (
               <View style={styles.infoLine}>
                 <Text style={styles.infoLabel}>EMI / Month</Text>
-                <Text style={styles.infoValue}>{formatCurrency(invoice.emiAmount)}</Text>
+                <Text style={styles.infoValue}>{formatCurrencyPDF(invoice.emiAmount)}</Text>
               </View>
             )}
             {invoice.loanCompletionDate && (

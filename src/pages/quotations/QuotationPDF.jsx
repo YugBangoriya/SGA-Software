@@ -1,20 +1,15 @@
-// SGA — Last updated: Three PDF fixes applied:
-// (1) Header overflow — added flex:1 to left panel and flexShrink:0 to right panel
-//     so "Quotation" heading no longer crowds/overlaps the quotation number.
-// (2) Text rendering — replaced all &amp; HTML entities with plain & character.
-//     @react-pdf/renderer <Text> does not process HTML entities; they rendered
-//     as literal "&amp;" in the generated PDF.
-// (3) Link box redesign — removed coloured badge boxes (IG/FB/GM). Platform
-//     names are now plain Helvetica-Bold text ("Instagram", "Facebook", etc.)
-//     followed by the clickable link, matching the client request.
-// New feature: businessWebsiteUrl now shown in Connect With Us section when set.
-// Placement retained: link box appears between customer info and price tables.
+// SGA — Last updated: Logo always rendered in quotation PDF header — imported LOGO_BASE64
+// as fallback; <Image> now uses src={s.businessLogoUrl || LOGO_BASE64} instead of the
+// conditional render that left the logo blank when businessLogoUrl was absent or null.
+// Prior fixes retained: header flex layout, & entity fix, link box redesign,
+// businessWebsiteUrl in Connect With Us section.
 // src/pages/quotations/QuotationPDF.jsx
 
 import React from "react";
 import {
   Document, Page, Text, View, StyleSheet, Image, Link,
 } from "@react-pdf/renderer";
+import LOGO_BASE64 from "../../assets/logo_base64";
 
 // Colours — matches SGA design tokens
 const C = {
@@ -73,7 +68,8 @@ const styles = StyleSheet.create({
     alignItems:  "flex-end",
     minWidth:    130,
   },
-  businessLogo: { width: 52, height: 52, borderRadius: 4, marginBottom: 6, objectFit: "contain" },
+  // Logo beside text (same row layout as InvoicePDF)
+  businessLogo: { width: 52, height: 52, borderRadius: 4, marginRight: 10, objectFit: "contain", flexShrink: 0 },
   businessName: { fontSize: 16, fontFamily: "Helvetica-Bold", color: C.burgundy },
   bizInfo:      { fontSize: 8.5, color: C.gray, marginTop: 1 },
   qLabel:       { fontSize: 22, fontFamily: "Helvetica-Bold", color: C.burgundy, letterSpacing: 2 },
@@ -505,13 +501,19 @@ export function QuotationPDFDocument({ quotation, businessSettings }) {
             "Quotation" heading from overflowing into / crowding the left column */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            {s.businessLogoUrl && (
-              <Image src={s.businessLogoUrl} style={styles.businessLogo} />
-            )}
-            <Text style={styles.businessName}>{s.businessName || "Shree Ganesh Automobile"}</Text>
-            {s.businessPhone   && <Text style={styles.bizInfo}>Ph: {s.businessPhone}</Text>}
-            {s.businessAddress && <Text style={styles.bizInfo}>{s.businessAddress}</Text>}
-            {s.gstNumber       && <Text style={styles.bizInfo}>GSTIN: {s.gstNumber}</Text>}
+            {/* Row layout: logo on the left, business info on the right — matches InvoicePDF */}
+            <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+              <Image
+                src={s.businessLogoUrl || LOGO_BASE64}
+                style={styles.businessLogo}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.businessName}>{s.businessName || "Shree Ganesh Automobile"}</Text>
+                {s.businessPhone   && <Text style={styles.bizInfo}>Ph: {s.businessPhone}</Text>}
+                {s.businessAddress && <Text style={styles.bizInfo}>{s.businessAddress}</Text>}
+                {s.gstNumber       && <Text style={styles.bizInfo}>GSTIN: {s.gstNumber}</Text>}
+              </View>
+            </View>
           </View>
 
           <View style={styles.headerRight}>

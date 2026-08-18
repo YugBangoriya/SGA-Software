@@ -23,6 +23,20 @@ export const formatCurrency = (amount) => {
   }).format(amount);
 };
 
+// ── PDF-safe currency formatter ────────────────────────────
+// Uses "Rs." prefix instead of ₹ (U+20B9).
+// @react-pdf/renderer renders ₹ as a garbled glyph (appears as "1") when
+// using Helvetica — the only safe built-in font — because Helvetica's
+// WinAnsiEncoding does not include that Unicode code point.
+// Use this function exclusively inside any @react-pdf/renderer <Text> node.
+export const formatCurrencyPDF = (amount) => {
+  if (amount === null || amount === undefined) return "Rs.0.00";
+  return "Rs." + new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
+
 // ── Date formatters ────────────────────────────────────────
 export const formatDate = (ts) => {
   if (!ts) return "—";
