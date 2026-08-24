@@ -1,4 +1,4 @@
-// SGA — Last updated: Untracked items (isUntracked: true) are excluded from low-stock list — they have no stock ceiling
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * LowStockBanner — Shree Ganesh Automobile
  * Shown at the top of the Inventory page when any TRACKED item is at or
@@ -7,7 +7,8 @@
 
 import { useState } from 'react';
 import { AlertTriangle, X, ChevronRight } from 'lucide-react';
-import { COLORS } from '../../lib/designTokens';
+import { COLORS as _COLORS } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 
 export default function LowStockBanner({ items = [], onItemClick }) {
   const [dismissed, setDismissed] = useState(false);

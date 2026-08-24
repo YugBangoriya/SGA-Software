@@ -1,4 +1,4 @@
-// SGA — Last updated: Added shortcut uniqueness check in ShortcutEditor — rejects duplicate shortcuts with the conflicting item name shown in the error. Restock entry editing also present.
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * ItemDetailPage — Shree Ganesh Automobile
  * Full detail view for a single inventory item.
@@ -31,7 +31,8 @@ import {
 
 import useInventoryStore from '../../store/inventoryStore';
 import useAuthStore      from '../../store/authStore';
-import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
+import { COLORS as _COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 import { useIsMobile }   from '../../hooks/useMediaQuery';
 import { QuantityDisplay, StockStatusBadge } from './index';
 import { formatCurrency, formatDate, toISODateString } from '../../lib/invoiceHelpers';

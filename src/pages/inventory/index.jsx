@@ -1,4 +1,4 @@
-// SGA — Last updated: Added "Download Shortcuts" button (owner/admin only) — generates a printable A4 PDF reference sheet listing all inventory items and their shortcuts in a 2-section per row layout (4 columns: Item | Shortcut || Item | Shortcut)
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * Inventory Page (Main List Screen) — Shree Ganesh Automobile
  *
@@ -33,7 +33,8 @@ import ShortcutListPDF from './ShortcutListPDF';
 
 import useInventoryStore from '../../store/inventoryStore';
 import useAuthStore      from '../../store/authStore';
-import { COLORS, TYPOGRAPHY, SHADOWS, RADII } from '../../lib/designTokens';
+import { COLORS as _COLORS, TYPOGRAPHY, SHADOWS, RADII } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 import { useIsMobile }   from '../../hooks/useMediaQuery';
 import { formatCurrency, formatDate } from '../../lib/invoiceHelpers';
 import LowStockBanner    from './LowStockBanner';

@@ -1,8 +1,6 @@
-// SGA — Last updated: Addressed ⚠️ Bug 1.2 — Added explanatory comment on the hardcoded
-// theme: "light" in createUserRecord. This is intentional and safe: syncFromUserDoc in
-// themeStore defers to localStorage first, so the Firestore default only matters on a
-// fresh device where no localStorage preference exists yet, and "light" is the correct
-// first-time default. No logic has been changed.
+// SGA — Last updated: Migrated from writeAuditLog (auditLog.js shim) to logAudit (auditService.js direct).
+// Removed auditLog.js dependency. All 7 audit calls updated: userRole now stored in metadata,
+// userName now uses real display name with email fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 // src/store/authStore.js
 // Global auth state via Zustand.
@@ -28,7 +26,7 @@ import {
   query,
   where,
 } from "@/lib/firebase";
-import { writeAuditLog, AUDIT_ACTIONS } from "@/lib/auditLog";
+import { logAudit, AUDIT_ACTIONS } from "@/lib/auditService";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -141,11 +139,11 @@ const useAuthStore = create((set, get) => ({
         return { success: false };
       }
 
-      await writeAuditLog({
+      await logAudit({
         action:   AUDIT_ACTIONS.LOGIN,
         userId:   cred.user.uid,
-        userRole: claims.role || userDoc?.role,
-        metadata: { email },
+        userName: userDoc?.name || cred.user.email || 'Unknown',
+        metadata: { email, userRole: claims.role || userDoc?.role },
       });
 
       set({
@@ -166,12 +164,13 @@ const useAuthStore = create((set, get) => ({
 
   // ── Logout (self) ─────────────────────────────────────────────────────────────
   logout: async () => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     if (firebaseUser) {
-      await writeAuditLog({
+      await logAudit({
         action:   AUDIT_ACTIONS.LOGOUT,
         userId:   firebaseUser.uid,
-        userRole: role,
+        userName: userDoc?.name || firebaseUser.email || 'Unknown',
+        metadata: { userRole: role },
       });
     }
     await signOut(auth);
@@ -186,16 +185,17 @@ const useAuthStore = create((set, get) => ({
 
   // ── Remote logout (Owner can log out employees; SA can log out anyone) ────────
   remoteLogout: async (targetUid) => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     try {
       // Set forceLogout flag — the target user's listener will pick this up
       await updateDoc(doc(db, "users", targetUid), { forceLogout: true });
-      await writeAuditLog({
+      await logAudit({
         action:           AUDIT_ACTIONS.REMOTE_LOGOUT,
         userId:           firebaseUser.uid,
-        userRole:         role,
+        userName:         userDoc?.name || firebaseUser.email || 'Unknown',
         targetId:         targetUid,
         targetCollection: "users",
+        metadata:         { userRole: role },
       });
       return { success: true };
     } catch (err) {
@@ -206,7 +206,7 @@ const useAuthStore = create((set, get) => ({
 
   // ── Block user account (SuperAdmin only) ──────────────────────────────────────
   blockUser: async (targetUid, block = true) => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     try {
       await updateDoc(doc(db, "users", targetUid), {
         isActive:       !block,
@@ -215,12 +215,13 @@ const useAuthStore = create((set, get) => ({
         // Also force logout if blocking
         forceLogout:    block ? true : false,
       });
-      await writeAuditLog({
+      await logAudit({
         action:           block ? AUDIT_ACTIONS.ACCOUNT_BLOCKED : AUDIT_ACTIONS.ACCOUNT_UNBLOCKED,
         userId:           firebaseUser.uid,
-        userRole:         role,
+        userName:         userDoc?.name || firebaseUser.email || 'Unknown',
         targetId:         targetUid,
         targetCollection: "users",
+        metadata:         { userRole: role },
       });
       return { success: true };
     } catch (err) {
@@ -230,14 +231,14 @@ const useAuthStore = create((set, get) => ({
 
   // ── Change own password ───────────────────────────────────────────────────────
   changePassword: async (newPassword) => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     try {
       await updatePassword(firebaseUser, newPassword);
-      await writeAuditLog({
+      await logAudit({
         action:   AUDIT_ACTIONS.PASSWORD_RESET,
         userId:   firebaseUser.uid,
-        userRole: role,
-        metadata: { self: true },
+        userName: userDoc?.name || firebaseUser.email || 'Unknown',
+        metadata: { self: true, userRole: role },
       });
       return { success: true };
     } catch (err) {
@@ -249,20 +250,20 @@ const useAuthStore = create((set, get) => ({
   // Note: This requires a Cloud Function on the backend.
   // The SA sets a "passwordResetRequired" flag; the Cloud Function sends reset email.
   adminResetPassword: async (targetUid, targetEmail) => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     try {
       await updateDoc(doc(db, "users", targetUid), {
         passwordResetRequired: true,
         passwordResetRequestedBy: firebaseUser.uid,
         passwordResetRequestedAt: serverTimestamp(),
       });
-      await writeAuditLog({
+      await logAudit({
         action:           AUDIT_ACTIONS.PASSWORD_RESET,
         userId:           firebaseUser.uid,
-        userRole:         role,
+        userName:         userDoc?.name || firebaseUser.email || 'Unknown',
         targetId:         targetUid,
         targetCollection: "users",
-        metadata:         { adminInitiated: true, targetEmail },
+        metadata:         { adminInitiated: true, targetEmail, userRole: role },
       });
       return { success: true };
     } catch (err) {
@@ -273,7 +274,7 @@ const useAuthStore = create((set, get) => ({
   // ── Create new user document in Firestore (SA action) ─────────────────────────
   // Actual Firebase Auth account is created via Cloud Function (admin SDK)
   createUserRecord: async ({ uid, name, email, role: newRole, username }) => {
-    const { firebaseUser, role } = get();
+    const { firebaseUser, role, userDoc } = get();
     try {
       await setDoc(doc(db, "users", uid), {
         uid,
@@ -301,13 +302,13 @@ const useAuthStore = create((set, get) => ({
         language:   "en",
         passwordResetRequired: false,
       });
-      await writeAuditLog({
+      await logAudit({
         action:           AUDIT_ACTIONS.USER_CREATED,
         userId:           firebaseUser.uid,
-        userRole:         role,
+        userName:         userDoc?.name || firebaseUser.email || 'Unknown',
         targetId:         uid,
         targetCollection: "users",
-        metadata:         { newRole, email },
+        metadata:         { newRole, email, userRole: role },
       });
       return { success: true };
     } catch (err) {

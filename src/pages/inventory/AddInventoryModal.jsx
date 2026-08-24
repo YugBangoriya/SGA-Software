@@ -1,4 +1,4 @@
-// SGA — Last updated: Added shortcut uniqueness validation — duplicate shortcuts are flagged at submit time with the conflicting item name shown in the error message
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * AddInventoryModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add a brand-new inventory item.
@@ -7,7 +7,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Package, Calendar, Tag, Hash, Truck, AlertTriangle, Info, ToggleLeft, ToggleRight, Zap, FileText } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
-import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
+import { COLORS as _COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 
 const todayISO = () => new Date().toISOString().split('T')[0];
 

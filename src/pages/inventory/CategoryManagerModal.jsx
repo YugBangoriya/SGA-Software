@@ -1,3 +1,4 @@
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * CategoryManagerModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only.
@@ -15,7 +16,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Tag, Plus, Edit2, Trash2, Check, AlertCircle } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
-import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
+import { COLORS as _COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 
 // ─── Inline edit row for a single category ────────────────────────────────
 

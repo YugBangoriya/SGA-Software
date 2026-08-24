@@ -1,4 +1,4 @@
-// SGA — Last updated: Added invoiceRef (Invoice/Order Reference) field to track supplier invoice numbers per replenishment batch
+// SGA — Last updated: Migrated COLORS import from designTokens shim to tokens.js directly
 /**
  * ReplenishModal — Shree Ganesh Automobile
  * Owner / SuperAdmin only modal to add more stock to an EXISTING inventory item.
@@ -15,7 +15,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, RefreshCw, AlertTriangle, TrendingUp, Package, FileText } from 'lucide-react';
 import useInventoryStore from '../../store/inventoryStore';
-import { COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/designTokens';
+import { COLORS as _COLORS, TYPOGRAPHY, RADII, SHADOWS } from '../../lib/tokens';
+const COLORS = _COLORS.light;
 import { QuantityDisplay, StockStatusBadge } from './index';
 import { formatCurrency } from '../../lib/invoiceHelpers';
 
